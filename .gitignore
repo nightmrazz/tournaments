@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+test-results
+playwright-report
+*.log
+
+# Local secrets and private files: everything in private/ except its README
+private/*
+!private/README.md
