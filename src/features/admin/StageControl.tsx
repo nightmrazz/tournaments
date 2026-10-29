@@ -4,7 +4,7 @@ import { nameMap } from '@/components/matches/MatchCard';
 import { useConfirm, useToast } from '@/components/ui/overlay';
 import { Alert, Button, Card, CardHeader } from '@/components/ui/primitives';
 import {
-  buildKnockout, EngineError, groupConfigProblems, groupLetter, groupStageComplete, groupStageSummary, knockoutMatches,
+  buildKnockout, confirmedParticipants, EngineError, groupConfigProblems, groupLetter, groupStageComplete, groupStageSummary, knockoutMatches,
   knockoutSeedsFromGroups, knockoutShapeNote, newSeed, previewDraw, roundRobinMatchCount, seedsForSingleElimination, sequentialIds,
 } from '@/engine';
 import { useTournamentActions } from '@/features/tournaments/queries';
@@ -33,6 +33,8 @@ export function StageControl({ b }: { b: TournamentBundle }) {
   const [seed, setSeed] = useState(tour.settings.drawSeed);
   const [previewOpen, setPreviewOpen] = useState(false);
   const names = useMemo(() => nameMap(b.participants), [b.participants]);
+  const confirmed = useMemo(() => confirmedParticipants(b), [b]);
+  const unconfirmed = b.participants.length - confirmed.length;
   const ko = knockoutMatches(b);
   const closed = tour.status === 'completed' || tour.status === 'cancelled';
   const ready = tour.status === 'registration_closed';
@@ -53,10 +55,10 @@ export function StageControl({ b }: { b: TournamentBundle }) {
   }, [previewOpen, b, seed]);
 
   const bracketPreview = useMemo(() => {
-    if (!previewOpen || tour.format !== 'single_elimination' || b.participants.length < 2) return null;
-    const ms = buildKnockout(seedsForSingleElimination(b.participants, seed), { tournamentId: tour.id, thirdPlace: false, ids: sequentialIds('p'), now: '' });
+    if (!previewOpen || tour.format !== 'single_elimination' || confirmed.length < 2) return null;
+    const ms = buildKnockout(seedsForSingleElimination(confirmed, seed), { tournamentId: tour.id, thirdPlace: false, ids: sequentialIds('p'), now: '' });
     return ms.filter((m) => m.round === 1).sort((a, c) => a.slot - c.slot);
-  }, [previewOpen, b.participants, seed, tour.format, tour.id]);
+  }, [previewOpen, confirmed, seed, tour.format, tour.id]);
 
   const resetKnockout = async () => {
     const played = ko.filter((m) => m.status === 'completed').length;
@@ -71,7 +73,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
   if (closed) return <Alert tone="info" title={tour.status === 'completed' ? t('This tournament is completed.') : t('This tournament is cancelled.')}>{tour.status === 'completed' ? t('Reopen it from the status menu to correct results.') : t('No further changes are possible.')}</Alert>;
 
   const drawn = b.matches.length > 0;
-  const allTeams = b.participants.length > 0 && b.participants.every((p) => p.team);
+  const allTeams = confirmed.length > 0 && confirmed.every((p) => p.team);
   const teamStep = (n: number) => (
     <Step n={n} title={t('Assign teams')} state={!drawn ? 'locked' : allTeams ? 'done' : 'active'}>
       {drawn ? <TeamAssignment b={b} /> : <p>{t('Available right after the draw: give every player a club manually.')}</p>}
@@ -80,7 +82,8 @@ export function StageControl({ b }: { b: TournamentBundle }) {
 
   const registrationStep = (
     <Step n={1} title={t('Close registration')} state={tour.status === 'draft' || tour.status === 'registration_open' ? 'active' : 'done'}>
-      {(tour.status === 'draft' || tour.status === 'registration_open') && <p>{t('Fixtures can be generated once registration is closed. Use the status controls above.')} {t('Registered players: {n}.', { n: b.participants.length })}</p>}
+      {(tour.status === 'draft' || tour.status === 'registration_open') && <p>{t('Fixtures can be generated once registration is closed. Use the status controls above.')} {t('Registered players: {n}.', { n: confirmed.length })}</p>}
+      {unconfirmed > 0 && !b.matches.length && <Alert tone="warning" title={t('{n} unconfirmed applications will not take part in the draw.', { n: unconfirmed })}>{t('Confirm or reject them in the Participants tab first.')}</Alert>}
     </Step>
   );
 
@@ -95,7 +98,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
               <Button size="sm" variant="danger" onClick={resetKnockout} loading={actions.resetKnockout.isPending}><RotateCcw className="h-4 w-4" />{t('Reset bracket')}</Button>
             ) : ready && (
               <>
-                <p>{t('Players with a manual seed are placed first; the rest are drawn with seed #{seed}.', { seed })} {tr(knockoutShapeNote(b.participants.length) ?? '')}</p>
+                <p>{t('Players with a manual seed are placed first; the rest are drawn with seed #{seed}.', { seed })} {tr(knockoutShapeNote(confirmed.length) ?? '')}</p>
                 {!previewOpen ? <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}><Sparkles className="h-4 w-4" />{t('Preview bracket')}</Button> : (
                   <>
                     <ul className="grid gap-1.5 sm:grid-cols-2">
@@ -120,7 +123,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
   }
 
   const s = tour.settings;
-  const problems = groupConfigProblems(b.participants.length, s);
+  const problems = groupConfigProblems(confirmed.length, s);
   const gs = groupStageSummary(b);
   const groupsDone = groupStageComplete(b);
   const seedsInfo = groupsDone && !ko.length ? knockoutSeedsFromGroups(b) : null;
@@ -140,7 +143,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
           ) : ready && (
             problems.length ? <Alert tone="warning" title={t('Cannot draw groups')}>{problems.map(tr).join(' ')} {t('Adjust the format in Settings.')}</Alert> : (
               <>
-                <p>{t('{n} players into {groups} groups. Manual seeds are spread across groups first; the rest are drawn randomly (draw #{seed}). Review before confirming — nothing is saved until you do.', { n: b.participants.length, groups: s.groupCount, seed })}</p>
+                <p>{t('{n} players into {groups} groups. Manual seeds are spread across groups first; the rest are drawn randomly (draw #{seed}). Review before confirming — nothing is saved until you do.', { n: confirmed.length, groups: s.groupCount, seed })}</p>
                 {!previewOpen ? <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}><Sparkles className="h-4 w-4" />{t('Preview draw')}</Button> : draw?.error ? <Alert tone="danger" title={draw.error} /> : (
                   <>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" data-testid="draw-preview">

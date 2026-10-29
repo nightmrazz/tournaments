@@ -4,10 +4,11 @@
 // change anything. It exists for development, demos and end-to-end tests only.
 
 import {
-  applyMutation as applyToBundle, assertCanAssignTeam, assertCanRegister, assertCanRemoveParticipant, EngineError, normalizeName, planStatusChange, uuid, type Mutation,
+  applyMutation as applyToBundle, assertCanAssignTeam, assertCanMarkReceiptSent, assertCanRegister, assertCanRemoveParticipant, assertCanSetRegistrationStatus,
+  EngineError, initialRegistrationStatus, isConfirmed, normalizeName, planStatusChange, uuid, type Mutation,
 } from '@/engine';
 import type { Group, GroupMember, Match, Participant, ParticipantContact, Tournament, TournamentBundle, UserIdentity } from '@/types/domain';
-import { AppError, type AuthApi, type DataService, type TournamentInput, type TournamentSummary } from './service';
+import { AppError, type AuthApi, type DataService, type MyApplication, type TournamentInput, type TournamentSummary } from './service';
 
 interface LocalDb {
   tournaments: Tournament[];
@@ -28,8 +29,8 @@ function load(): LocalDb {
     const raw = localStorage.getItem(KEY);
     if (!raw) return empty();
     const db = { ...empty(), ...(JSON.parse(raw) as LocalDb) };
-    // Data saved before teams existed has no `team` field.
-    db.participants = db.participants.map((p) => ({ ...p, team: p.team ?? null }));
+    // Data saved before teams / paid registration existed lacks those fields.
+    db.participants = db.participants.map((p) => ({ ...p, team: p.team ?? null, status: p.status ?? 'confirmed' }));
     return db;
   } catch {
     return empty();
@@ -77,7 +78,16 @@ function writeBundle(db: LocalDb, b: TournamentBundle) {
   db.matches = [...db.matches.filter((m) => m.tournamentId !== id), ...b.matches];
 }
 
-const summary = (db: LocalDb, t: Tournament): TournamentSummary => ({ ...t, participantCount: db.participants.filter((p) => p.tournamentId === t.id).length });
+const summary = (db: LocalDb, t: Tournament): TournamentSummary => ({ ...t, participantCount: db.participants.filter((p) => p.tournamentId === t.id && isConfirmed(p)).length });
+
+// Applications made from this browser — local mode has no accounts, so this is the "personal cabinet".
+const MY_KEY = 'temcch:my-applications';
+function myIds(): string[] {
+  try { return JSON.parse(localStorage.getItem(MY_KEY) ?? '[]') as string[]; } catch { return []; }
+}
+function rememberMine(id: string) {
+  try { localStorage.setItem(MY_KEY, JSON.stringify([...new Set([...myIds(), id])])); } catch { /* not persisted */ }
+}
 
 const listeners = new Set<() => void>();
 
@@ -86,6 +96,8 @@ const auth: AuthApi = {
   signIn: async () => { throw new AppError('Sign-in is not available in local mode. Configure Supabase to enable accounts.'); },
   signUp: async () => { throw new AppError('Sign-up is not available in local mode. Configure Supabase to enable accounts.'); },
   signOut: async () => undefined,
+  updateNickname: async () => { throw new AppError('Accounts are disabled in local mode'); },
+  nicknameAvailable: async () => true,
   onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
 };
 
@@ -128,8 +140,9 @@ export function createLocalService(): DataService {
           s.doubleRoundRobin !== t.settings.doubleRoundRobin || s.thirdPlaceMatch !== t.settings.thirdPlaceMatch));
         if (structural) throw new AppError('Format and structure settings cannot change after fixtures exist.');
       }
-      if (input.maxParticipants !== undefined && input.maxParticipants < b.participants.length)
-        throw new AppError(`Capacity cannot be lower than the current number of participants (${b.participants.length}).`);
+      const confirmed = b.participants.filter(isConfirmed).length;
+      if (input.maxParticipants !== undefined && input.maxParticipants < confirmed)
+        throw new AppError(`Capacity cannot be lower than the current number of participants (${confirmed}).`);
       const next: Tournament = { ...t, ...input, updatedAt: new Date().toISOString() };
       db.tournaments = db.tournaments.map((x) => (x.id === id ? next : x));
       save(db);
@@ -157,7 +170,11 @@ export function createLocalService(): DataService {
       save(db);
     }),
 
-    register: (tournamentId, input) => wrap(() => addParticipant(tournamentId, input, false)),
+    register: (tournamentId, input) => wrap(() => {
+      const p = addParticipant(tournamentId, input, false);
+      rememberMine(p.id);
+      return p;
+    }),
     addParticipant: (tournamentId, input) => wrap(() => addParticipant(tournamentId, input, true)),
 
     updateParticipant: (participantId, patch) => wrap(() => {
@@ -192,6 +209,39 @@ export function createLocalService(): DataService {
       save(db);
     }),
 
+    setRegistrationStatus: (participantId, status) => wrap(() => {
+      const db = load();
+      const p = db.participants.find((x) => x.id === participantId);
+      if (!p) throw new AppError('Participant not found.');
+      const b = bundleOf(db, p.tournamentId) as TournamentBundle;
+      assertCanSetRegistrationStatus(b.tournament, b.participants, p, status, b.matches.length > 0);
+      p.status = status;
+      save(db);
+    }),
+
+    markReceiptSent: (participantId) => wrap(() => {
+      const db = load();
+      const p = db.participants.find((x) => x.id === participantId);
+      if (!p) throw new AppError('Participant not found.');
+      const b = bundleOf(db, p.tournamentId) as TournamentBundle;
+      if (b.matches.length) throw new AppError('Registration status cannot change after the draw.');
+      assertCanMarkReceiptSent(p);
+      p.status = 'awaiting_review';
+      save(db);
+    }),
+
+    listMyApplications: () => wrap(() => {
+      const db = load();
+      const mine = new Set(myIds());
+      return db.participants
+        .filter((p) => mine.has(p.id))
+        .flatMap((p): MyApplication[] => {
+          const tournament = db.tournaments.find((t) => t.id === p.tournamentId);
+          return tournament ? [{ participant: p, tournament }] : [];
+        })
+        .sort((a, c) => c.participant.createdAt.localeCompare(a.participant.createdAt));
+    }),
+
     listContacts: (tournamentId) => wrap(() => {
       const db = load();
       const ids = new Set(db.participants.filter((p) => p.tournamentId === tournamentId).map((p) => p.id));
@@ -217,7 +267,8 @@ export function createLocalService(): DataService {
     assertCanRegister(b.tournament, b.participants, input, { userId: null, asOrganizer });
     const p: Participant = {
       id: uuid(), tournamentId, displayName: input.displayName.trim(), gamertag: input.displayName.trim(),
-      team: null, seed: input.seed ?? null, userId: null, createdAt: new Date().toISOString(),
+      team: null, status: initialRegistrationStatus(b.tournament, asOrganizer),
+      seed: input.seed ?? null, userId: null, createdAt: new Date().toISOString(),
     };
     db.participants.push(p);
     if (input.contact?.trim()) db.contacts.push({ participantId: p.id, contact: input.contact.trim() });

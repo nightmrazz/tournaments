@@ -7,10 +7,12 @@ import { useConfirm, useToast } from '@/components/ui/overlay';
 import { Alert, Button, Card, CardHeader, EmptyState, Field, Input } from '@/components/ui/primitives';
 import { service } from '@/data';
 import { makeParticipantSchema } from '@/features/participants/RegisterForm';
+import { isConfirmed } from '@/engine';
 import { useContacts, useInvalidateTournament } from '@/features/tournaments/queries';
 import { t } from '@/i18n';
 import { errorMessage } from '@/lib/utils';
 import type { Participant, TournamentBundle } from '@/types/domain';
+import { ApplicationsPanel } from './ApplicationsPanel';
 import { InlineField } from './InlineField';
 import { ClubSuggestions, duplicateTeams, TeamInput, useSaveTeam } from './TeamAssignment';
 
@@ -32,9 +34,11 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
     resolver: zodResolver(makeAddSchema()), defaultValues: { displayName: '', contact: '', seed: '' },
   });
   const contactOf = new Map((contacts.data ?? []).map((c) => [c.participantId, c.contact]));
-  const full = b.participants.length >= tour.maxParticipants;
+  const confirmed = b.participants.filter(isConfirmed);
+  const hasApplications = tour.settings.requirePayment || confirmed.length < b.participants.length;
+  const full = confirmed.length >= tour.maxParticipants;
   const drawn = b.matches.length > 0;
-  const dups = duplicateTeams(b.participants);
+  const dups = duplicateTeams(confirmed);
   const saveTeam = useSaveTeam(tour.id);
 
   const add = async (v: AddForm) => {
@@ -63,8 +67,8 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
     catch (e) { toast('error', errorMessage(e)); throw e; }
   };
 
-  const sorted = [...b.participants].sort((a, c) => (a.seed ?? 999) - (c.seed ?? 999) || a.createdAt.localeCompare(c.createdAt));
-  const withTeam = b.participants.filter((p) => p.team).length;
+  const sorted = [...confirmed].sort((a, c) => (a.seed ?? 999) - (c.seed ?? 999) || a.createdAt.localeCompare(c.createdAt));
+  const withTeam = confirmed.filter((p) => p.team).length;
 
   return (
     <div className="space-y-5">
@@ -74,9 +78,10 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
           {t('Fixtures have been generated. Reset the fixtures in Stage control to add, remove or reseed players. Teams are assigned now — here or in Stage control.')}
         </Alert>
       )}
+      {hasApplications && <ApplicationsPanel b={b} contactOf={contactOf} />}
       {!locked && (
         <Card>
-          <CardHeader title={t('Add participant')} description={full ? t('The tournament is full. Raise the capacity in Settings to add more.') : t('Add players who registered offline. Registration does not need to be open.')} />
+          <CardHeader title={t('Add participant')} description={full ? t('The tournament is full. Raise the capacity in Settings to add more.') : t('Add players who registered offline (for example, paid in cash). They are confirmed immediately.')} />
           <form onSubmit={handleSubmit(add)} className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-[1fr_1fr_6rem_auto] lg:items-end" noValidate>
             {error && <Alert tone="danger" title={error} className="sm:col-span-2 lg:col-span-4" />}
             <Field label={t('Display name')} error={errors.displayName?.message}>{(p) => <Input {...p} {...register('displayName')} disabled={full} />}</Field>
@@ -88,14 +93,14 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
       )}
       <Card>
         <CardHeader
-          title={t('Participants ({count}/{max})', { count: b.participants.length, max: tour.maxParticipants })}
+          title={t('Participants ({count}/{max})', { count: confirmed.length, max: tour.maxParticipants })}
           description={drawn
             ? t('Assign a team (club) to each player; type any name or pick a suggestion. Seeds are optional. Contact details are visible only to organizers.')
             : t('Teams are assigned after the draw. Seeds are optional. Contact details are visible only to organizers.')}
-          action={b.participants.length > 0 && <span className="flex items-center gap-1.5 text-xs text-muted"><Shield className="h-3.5 w-3.5" aria-hidden />{t('Teams assigned: {n}/{total}', { n: withTeam, total: b.participants.length })}</span>}
+          action={confirmed.length > 0 && <span className="flex items-center gap-1.5 text-xs text-muted"><Shield className="h-3.5 w-3.5" aria-hidden />{t('Teams assigned: {n}/{total}', { n: withTeam, total: confirmed.length })}</span>}
         />
-        {!b.participants.length ? (
-          <div className="p-4"><EmptyState icon={<Users className="h-8 w-8" />} title={t('No participants yet')} description={t('Open registration or add players manually.')} /></div>
+        {!confirmed.length ? (
+          <div className="p-4"><EmptyState icon={<Users className="h-8 w-8" />} title={t('No participants yet')} description={hasApplications ? t('Confirm paid applications above or add players manually.') : t('Open registration or add players manually.')} /></div>
         ) : (
           <div className="relative overflow-x-auto">
             <table className="w-full min-w-[40rem] text-sm">

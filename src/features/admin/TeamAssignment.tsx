@@ -1,6 +1,7 @@
 import { Shield } from 'lucide-react';
 import { useToast } from '@/components/ui/overlay';
 import { service } from '@/data';
+import { isConfirmed } from '@/engine';
 import { CLUBS } from '@/features/participants/clubs';
 import { useInvalidateTournament } from '@/features/tournaments/queries';
 import { t, tr } from '@/i18n';
@@ -56,22 +57,23 @@ export function duplicateTeams(ps: Participant[]): Set<string> {
 export function TeamAssignment({ b }: { b: TournamentBundle }) {
   const save = useSaveTeam(b.tournament.id);
   const byId = new Map(b.participants.map((p) => [p.id, p]));
-  const dups = duplicateTeams(b.participants);
-  const assigned = b.participants.filter((p) => p.team).length;
+  const players = b.participants.filter(isConfirmed);
+  const dups = duplicateTeams(players);
+  const assigned = players.filter((p) => p.team).length;
   const sections: { key: string; title: string | null; players: Participant[] }[] = b.groups.length
     ? [...b.groups].sort((a, c) => a.index - c.index).map((g) => ({
         key: g.id,
         title: tr(g.name),
         players: b.groupMembers.filter((m) => m.groupId === g.id).sort((x, y) => x.position - y.position).map((m) => byId.get(m.participantId)).filter((p): p is Participant => !!p),
       }))
-    : [{ key: 'all', title: null, players: [...b.participants].sort((a, c) => a.displayName.localeCompare(c.displayName)) }];
+    : [{ key: 'all', title: null, players: [...players].sort((a, c) => a.displayName.localeCompare(c.displayName)) }];
 
   return (
     <div className="space-y-3" data-testid="team-assignment">
       <ClubSuggestions />
       <p className="flex items-center gap-1.5">
         <Shield className="h-4 w-4 text-accent" aria-hidden />
-        <span className={cn('tabular', assigned === b.participants.length ? 'text-success' : 'text-fg')}>{t('Teams assigned: {n}/{total}', { n: assigned, total: b.participants.length })}</span>
+        <span className={cn('tabular', assigned === players.length ? 'text-success' : 'text-fg')}>{t('Teams assigned: {n}/{total}', { n: assigned, total: players.length })}</span>
       </p>
       <p>{t('Type a club or pick a suggestion; it is saved when you leave the field. Teams can be changed until the tournament ends.')}</p>
       <div className={cn('grid gap-2', sections.length > 1 && 'md:grid-cols-2')}>

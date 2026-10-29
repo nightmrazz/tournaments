@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Clock, Layers, MapPin, Monitor, Settings2, Users } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Clock, Layers, MapPin, Monitor, Settings2, Users, Wallet } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ChampionBanner } from '@/components/bracket/Bracket';
@@ -8,7 +8,7 @@ import { StageProgress, StatusBadge } from '@/components/tournament/TournamentBi
 import { MatchesView, NextMatches, ParticipantsView, PlayoffsView, StandingsView } from '@/components/tournament/Views';
 import { TabPanel, Tabs, type TabDef } from '@/components/ui/overlay';
 import { Alert, Button, Card, CardHeader, Skeleton } from '@/components/ui/primitives';
-import { FORMAT_LABEL, podium, registrationState, stageProgress } from '@/engine';
+import { confirmedParticipants, FORMAT_LABEL, podium, registrationState, stageProgress } from '@/engine';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { RegisterForm } from '@/features/participants/RegisterForm';
 import { useBundle } from '@/features/tournaments/queries';
@@ -19,7 +19,7 @@ import type { TournamentBundle } from '@/types/domain';
 export function tournamentTabs(b: TournamentBundle): TabDef[] {
   const tabs: TabDef[] = [
     { id: 'overview', label: t('Overview') },
-    { id: 'participants', label: t('Participants'), count: b.participants.length },
+    { id: 'participants', label: t('Participants'), count: confirmedParticipants(b).length },
   ];
   if (b.tournament.format === 'groups_knockout') tabs.push({ id: 'standings', label: t('Standings') });
   tabs.push({ id: 'matches', label: t('Matches'), count: b.matches.length || undefined });
@@ -40,8 +40,10 @@ function Overview({ b }: { b: TournamentBundle }) {
   const tour = b.tournament;
   const s = tour.settings;
   const names = nameMap(b.participants);
-  const reg = registrationState(tour, b.participants.length);
-  const showRegistration = tour.status === 'registration_open' || tour.status === 'draft';
+  const confirmedCount = confirmedParticipants(b).length;
+  const reg = registrationState(tour, confirmedCount);
+  // Until the draw, the registration card also shows a player's own application and its payment status.
+  const showRegistration = tour.status === 'registration_open' || tour.status === 'draft' || (tour.status === 'registration_closed' && !b.matches.length);
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
       <div className="min-w-0 space-y-5">
@@ -82,7 +84,8 @@ function Overview({ b }: { b: TournamentBundle }) {
             <Fact icon={<CalendarDays className="h-4 w-4" />} label={t('Starts')}>{tour.startsAt ? `${formatDate(tour.startsAt)} · ${formatTime(tour.startsAt)}` : t('To be announced')}</Fact>
             {tour.venue && <Fact icon={<MapPin className="h-4 w-4" />} label={t('Venue')}>{tour.venue}</Fact>}
             <Fact icon={<Layers className="h-4 w-4" />} label={t('Format')}>{t(FORMAT_LABEL[tour.format])}</Fact>
-            <Fact icon={<Users className="h-4 w-4" />} label={t('Players')}><span className="tabular">{b.participants.length} / {tour.maxParticipants}</span></Fact>
+            <Fact icon={<Users className="h-4 w-4" />} label={t('Players')}><span className="tabular">{confirmedCount} / {tour.maxParticipants}</span></Fact>
+            {s.requirePayment && s.entryFee && <Fact icon={<Wallet className="h-4 w-4" />} label={t('Entry fee')}>{s.entryFee}</Fact>}
             <Fact icon={<Clock className="h-4 w-4" />} label={t('Registration')}>
               {reg.open
                 ? tour.registrationDeadline ? t('Open until {date}', { date: formatDateTime(tour.registrationDeadline) }) : t('Open')
@@ -131,7 +134,7 @@ export function TournamentPage() {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2"><StatusBadge status={tour.status} /><span className="text-sm text-muted">{t(FORMAT_LABEL[tour.format])}</span></div>
           <h1 className="mt-2 break-words text-3xl font-bold sm:text-4xl">{tour.name}</h1>
-          <p className="mt-1 text-sm text-muted">{formatDate(tour.startsAt)}{tour.venue && ` · ${tour.venue}`} · <span className="tabular">{t('{count}/{max} players', { count: b.participants.length, max: tour.maxParticipants })}</span></p>
+          <p className="mt-1 text-sm text-muted">{formatDate(tour.startsAt)}{tour.venue && ` · ${tour.venue}`} · <span className="tabular">{t('{count}/{max} players', { count: confirmedParticipants(b).length, max: tour.maxParticipants })}</span></p>
         </div>
         {canManage(tour) && <Link to={`/admin/tournaments/${tour.id}`}><Button variant="outline"><Settings2 className="h-4 w-4" aria-hidden />{t('Manage')}</Button></Link>}
       </header>

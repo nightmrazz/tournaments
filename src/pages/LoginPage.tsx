@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -10,20 +10,28 @@ import { useToast } from '@/components/ui/overlay';
 import { service } from '@/data';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { t } from '@/i18n';
+import { NICKNAME_RE } from '@/features/auth/nickname';
 import { errorMessage } from '@/lib/utils';
 
-const makeSchema = () => z.object({
+/** The nickname is validated only in sign-up mode; `isSignup` is read at validation time. */
+const makeSchema = (isSignup: () => boolean) => z.object({
   email: z.email(t('Enter a valid email address')),
   password: z.string().min(8, t('At least 8 characters')),
-  displayName: z.string().trim().max(40).optional(),
+  displayName: z.string().optional(),
+}).superRefine((v, ctx) => {
+  if (isSignup() && !NICKNAME_RE.test((v.displayName ?? '').trim()))
+    ctx.addIssue({ code: 'custom', path: ['displayName'], message: t('Nickname: 3–24 letters, digits, _ . - (no spaces).') });
 });
 type Form = z.infer<ReturnType<typeof makeSchema>>;
+
 
 /** Only allow in-app redirects after sign-in (prevents open redirects). */
 const safeNext = (next: string | null) => (next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
 
 export function LoginPage() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [params] = useSearchParams();
@@ -31,7 +39,7 @@ export function LoginPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Form>({ resolver: zodResolver(makeSchema()) });
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Form>({ resolver: zodResolver(makeSchema(() => modeRef.current === 'signup')) });
   const next = safeNext(params.get('next'));
 
   if (service.mode === 'local') {
@@ -55,7 +63,12 @@ export function LoginPage() {
         toast('success', t('Signed in.'));
         navigate(next, { replace: true });
       } else {
-        const r = await service.auth.signUp(v.email, v.password, v.displayName || v.email.split('@')[0]);
+        const nickname = (v.displayName ?? '').trim();
+        if (!(await service.auth.nicknameAvailable(nickname))) {
+          setError(t('This nickname is already taken.'));
+          return;
+        }
+        const r = await service.auth.signUp(v.email, v.password, nickname);
         if (r.needsConfirmation) setInfo(t('Check your inbox to confirm your email, then sign in.'));
         else { await qc.invalidateQueries(); navigate(next, { replace: true }); }
       }
@@ -72,7 +85,7 @@ export function LoginPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
           {error && <Alert tone="danger" title={error} />}
           {info && <Alert tone="success" title={info} />}
-          {mode === 'signup' && <Field label={t('Display name')} error={errors.displayName?.message}>{(p) => <Input {...p} {...register('displayName')} autoComplete="nickname" />}</Field>}
+          {mode === 'signup' && <Field label={t('Nickname')} error={errors.displayName?.message} hint={t('3–24 letters, digits, _ . - — you can change it later in My cabinet.')}>{(p) => <Input {...p} {...register('displayName')} autoComplete="nickname" />}</Field>}
           <Field label={t('Email')} error={errors.email?.message}>{(p) => <Input {...p} {...register('email')} type="email" autoComplete="email" />}</Field>
           <Field label={t('Password')} error={errors.password?.message}>{(p) => <Input {...p} {...register('password')} type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} />}</Field>
           <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>{mode === 'signin' ? t('Sign in') : t('Create account')}</Button>

@@ -3,16 +3,18 @@
 import { createClient, type PostgrestError, type SupabaseClient } from '@supabase/supabase-js';
 import type { UserIdentity } from '@/types/domain';
 import {
-  toDbMutation, toGroup, toGroupMember, toMatch, toParticipant, toTournament,
+  parseSettings, toDbMutation, toGroup, toGroupMember, toMatch, toParticipant, toTournament,
   type GroupMemberRow, type GroupRow, type MatchRow, type ParticipantRow, type TournamentRow,
 } from './mappers';
-import { AppError, type DataService, type TournamentInput, type TournamentSummary } from './service';
+import { AppError, type DataService, type MyApplication, type TournamentInput, type TournamentSummary } from './service';
 
 function fail(error: PostgrestError | { message: string; code?: string } | null): never {
   const code = error && 'code' in error ? error.code ?? 'ERROR' : 'ERROR';
   let message = error?.message ?? 'Unexpected error';
   if (code === '42501' && /row-level security/i.test(message)) message = 'You do not have permission to do that.';
-  if (code === '23505' && /participants_tag_unique/.test(message)) message = 'This name is already registered.';
+  if (code === '23505' && /participants_(tag|name)_unique/.test(message)) message = 'This name is already registered.';
+  if (code === '23505' && /profiles_nickname_unique/.test(message)) message = 'This nickname is already taken.';
+  if (code === '23505' && /participants_application_code_unique/.test(message)) message = 'Please try again.';
   if (code === 'PGRST116') message = 'Not found.';
   throw new AppError(message, code);
 }
@@ -69,6 +71,14 @@ export function createSupabaseService(url: string, anonKey: string): DataService
       },
       async signOut() {
         await sb.auth.signOut();
+      },
+      async updateNickname(nickname) {
+        const { data } = await sb.auth.getUser();
+        if (!data.user) fail({ message: 'Sign in first' });
+        check(await sb.from('profiles').update({ display_name: nickname.trim() }).eq('id', data.user.id).select('id').single());
+      },
+      async nicknameAvailable(nickname) {
+        return check(await sb.rpc('nickname_available', { p_nickname: nickname })) as boolean;
       },
       onChange(cb) {
         const { data } = sb.auth.onAuthStateChange(() => cb());
@@ -158,6 +168,31 @@ export function createSupabaseService(url: string, anonKey: string): DataService
 
     async removeParticipant(participantId) {
       check(await sb.from('participants').delete().eq('id', participantId).select('id').single());
+    },
+
+    async setRegistrationStatus(participantId, status) {
+      check(await sb.from('participants').update({ payment_status: status }).eq('id', participantId).select('id').single());
+    },
+
+    async markReceiptSent(participantId) {
+      check(await sb.rpc('mark_receipt_sent', { p_participant_id: participantId }));
+    },
+
+    async listMyApplications() {
+      const { data } = await sb.auth.getUser();
+      if (!data.user) return [];
+      type Row = ParticipantRow & { tournaments: Pick<TournamentRow, 'id' | 'name' | 'status' | 'starts_at' | 'settings'> | null };
+      const rows = check(await sb.from('participants')
+        .select('*, tournaments(id, name, status, starts_at, settings)')
+        .eq('user_id', data.user.id)
+        .order('created_at', { ascending: false })) as Row[];
+      return rows.filter((r) => r.tournaments).map((r): MyApplication => {
+        const tr = r.tournaments as NonNullable<Row['tournaments']>;
+        return {
+          participant: toParticipant(r),
+          tournament: { id: tr.id, name: tr.name, status: tr.status, startsAt: tr.starts_at, settings: parseSettings(tr.settings) },
+        };
+      });
     },
 
     async listContacts(tournamentId) {

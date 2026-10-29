@@ -8,7 +8,8 @@ export interface TournamentRow {
   max_participants: number; settings: Partial<TournamentSettings>; version: number; created_at: string; updated_at: string;
 }
 export interface ParticipantRow {
-  id: string; tournament_id: string; display_name: string; gamertag: string; team: string | null; seed: number | null; user_id: string | null; created_at: string;
+  id: string; tournament_id: string; display_name: string; gamertag: string; team: string | null; payment_status?: Participant['status'];
+  seed: number | null; user_id: string | null; created_at: string;
 }
 export interface GroupRow { id: string; tournament_id: string; name: string; index: number }
 export interface GroupMemberRow { group_id: string; participant_id: string; tournament_id: string; position: number }
@@ -33,7 +34,7 @@ export const toTournament = (r: TournamentRow): Tournament => ({
 });
 
 export const toParticipant = (r: ParticipantRow): Participant => ({
-  id: r.id, tournamentId: r.tournament_id, displayName: r.display_name, gamertag: r.gamertag, team: r.team ?? null, seed: r.seed, userId: r.user_id, createdAt: r.created_at,
+  id: r.id, tournamentId: r.tournament_id, displayName: r.display_name, gamertag: r.gamertag, team: r.team ?? null, status: r.payment_status ?? 'confirmed', seed: r.seed, userId: r.user_id, createdAt: r.created_at,
 });
 
 export const toGroup = (r: GroupRow): Group => ({ id: r.id, tournamentId: r.tournament_id, name: r.name, index: r.index });

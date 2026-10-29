@@ -15,6 +15,10 @@ const TIEBREAK_PRESETS: Record<string, { label: string; order: Tiebreaker[] }> =
 };
 const presetOf = (order: Tiebreaker[]) => (order[0]?.startsWith('h2h') ? 'h2h' : 'overall');
 
+/** Telegram usernames: 5–32 chars, Latin letters, digits and underscores; a leading @ is allowed. */
+const TELEGRAM_RE = /^@?[A-Za-z0-9_]{5,32}$/;
+export const normalizeTelegram = (s: string) => s.trim().replace(/^@/, '');
+
 const int = (min: number, max: number) =>
   z.number({ error: t('Enter a number') }).int(t('Whole numbers only')).min(min, t('Minimum {n}', { n: min })).max(max, t('Maximum {n}', { n: max }));
 
@@ -39,10 +43,20 @@ const makeSchema = () => z.object({
   walkoverGoals: int(1, 10),
   requireContact: z.boolean(),
   stations: int(0, 64),
+  requirePayment: z.boolean(),
+  entryFee: z.string().trim().max(60, t('At most 60 characters')),
+  paymentDetails: z.string().trim().max(1000, t('At most 1000 characters')),
+  telegramUsername: z.string().trim().max(40),
 }).refine((v) => !v.startsAt || !v.registrationDeadline || v.registrationDeadline <= v.startsAt, {
   path: ['registrationDeadline'], message: t('The deadline must be before the start time'),
 }).refine((v) => v.pointsWin > v.pointsDraw && v.pointsDraw >= v.pointsLoss, {
   path: ['pointsWin'], message: t('A win must be worth more than a draw, and a draw at least as much as a loss'),
+}).refine((v) => !v.requirePayment || v.entryFee.length > 0, {
+  path: ['entryFee'], message: t('Enter the entry fee'),
+}).refine((v) => !v.requirePayment || v.paymentDetails.length >= 5, {
+  path: ['paymentDetails'], message: t('Enter the payment details'),
+}).refine((v) => !v.requirePayment || TELEGRAM_RE.test(v.telegramUsername), {
+  path: ['telegramUsername'], message: t('Telegram username: 5–32 Latin letters, digits or _'),
 });
 type FormValues = z.infer<ReturnType<typeof makeSchema>>;
 
@@ -55,6 +69,8 @@ function defaults(tour?: Tournament): FormValues {
     groupCount: s.groupCount, advancePerGroup: s.advancePerGroup, pointsWin: s.pointsWin, pointsDraw: s.pointsDraw, pointsLoss: s.pointsLoss,
     tiebreakPreset: presetOf(s.tiebreakers), doubleRoundRobin: s.doubleRoundRobin, thirdPlaceMatch: s.thirdPlaceMatch,
     walkoverGoals: s.walkoverGoals, requireContact: s.requireContact, stations: s.stations,
+    requirePayment: s.requirePayment, entryFee: s.entryFee, paymentDetails: s.paymentDetails,
+    telegramUsername: s.telegramUsername ? `@${s.telegramUsername}` : '',
   };
 }
 
@@ -104,6 +120,8 @@ export function TournamentForm({ initial, locked, onSubmit, submitLabel }: {
           tiebreakers: TIEBREAK_PRESETS[f.tiebreakPreset].order, doubleRoundRobin: f.doubleRoundRobin, thirdPlaceMatch: f.thirdPlaceMatch,
           walkoverGoals: f.walkoverGoals, requireContact: f.requireContact, stations: f.stations,
           drawSeed: initial?.settings.drawSeed ?? newSeed(),
+          requirePayment: f.requirePayment, entryFee: f.entryFee.trim(), paymentDetails: f.paymentDetails.trim(),
+          telegramUsername: normalizeTelegram(f.telegramUsername),
         },
       });
     } catch (e) {
@@ -178,6 +196,24 @@ export function TournamentForm({ initial, locked, onSubmit, submitLabel }: {
         <CardHeader title={t('Registration')} />
         <div className="p-4 sm:p-5">
           <Checkbox label={t('Require contact information')} description={t('Players must leave a phone, Telegram or email. Only organizers can see it.')} {...register('requireContact')} />
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title={t('Entry fee and payment')} description={t('Players see these details after submitting the registration form. You confirm each payment manually.')} />
+        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
+          <div className="sm:col-span-2">
+            <Checkbox label={t('Require an entry fee')} description={t('A registration becomes a participant only after you confirm the payment receipt.')} {...register('requirePayment')} />
+          </div>
+          {v.requirePayment && (
+            <>
+              <Field label={t('Entry fee')} error={errors.entryFee?.message} hint={t('Shown to players as written')}>{(p) => <Input {...p} {...register('entryFee')} placeholder={t('e.g. 7 000 ₸')} />}</Field>
+              <Field label={t('Telegram for receipts')} error={errors.telegramUsername?.message} hint={t('Players send the receipt to this username')}>{(p) => <Input {...p} {...register('telegramUsername')} placeholder="@username" autoComplete="off" />}</Field>
+              <Field label={t('Payment details')} error={errors.paymentDetails?.message} className="sm:col-span-2" hint={t('Card number, bank, recipient name, Kaspi number — whatever players need for the transfer.')}>
+                {(p) => <Textarea {...p} {...register('paymentDetails')} className="min-h-28" placeholder={t('e.g. Kaspi Gold 4400 4301 2345 6789, Temirkhan S.')} />}
+              </Field>
+            </>
+          )}
         </div>
       </Card>
 

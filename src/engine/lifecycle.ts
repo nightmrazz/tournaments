@@ -1,4 +1,4 @@
-import type { Match, Tournament, TournamentBundle, TournamentStatus } from '@/types/domain';
+import type { Match, Participant, RegistrationStatus, Tournament, TournamentBundle, TournamentStatus } from '@/types/domain';
 import { roundName } from './knockout';
 import { computeGroupStandings, fallbackInfo, type GroupStandings } from './standings';
 
@@ -44,6 +44,20 @@ export function registrationState(t: Tournament, participantCount: number, now =
   if (participantCount >= t.maxParticipants) return { open: false, reason: 'This tournament is full.' };
   return { open: true, reason: null };
 }
+
+/** Only confirmed registrations are tournament participants (draw, capacity, public lists). */
+export const isConfirmed = (p: Pick<Participant, 'status'>) => p.status === 'confirmed';
+export const confirmedParticipants = (b: Pick<TournamentBundle, 'participants'>) => b.participants.filter(isConfirmed);
+
+/** Short, human-friendly application ID shown to players and quoted with payment receipts. */
+export const applicationCode = (participantId: string) => participantId.replace(/-/g, '').slice(0, 8).toUpperCase();
+
+export const REGISTRATION_STATUS_LABEL: Record<RegistrationStatus, string> = {
+  awaiting_payment: 'Awaiting payment',
+  awaiting_review: 'Awaiting receipt check',
+  confirmed: 'Confirmed',
+  rejected: 'Payment not confirmed',
+};
 
 export const groupMatches = (b: TournamentBundle) => b.matches.filter((m) => m.stage === 'group');
 export const knockoutMatches = (b: TournamentBundle) => b.matches.filter((m) => m.stage === 'knockout');
@@ -131,7 +145,7 @@ export interface StageStep {
 /** Progress tracker shown on the overview: each stage is unlocked only when the previous one is finished. */
 export function stageProgress(b: TournamentBundle): StageStep[] {
   const t = b.tournament;
-  const steps: Omit<StageStep, 'state'>[] = [{ key: 'registration', label: 'Registration', detail: `${b.participants.length}/${t.maxParticipants}` }];
+  const steps: Omit<StageStep, 'state'>[] = [{ key: 'registration', label: 'Registration', detail: `${confirmedParticipants(b).length}/${t.maxParticipants}` }];
   const done: boolean[] = [t.status !== 'draft' && t.status !== 'registration_open'];
   if (t.format === 'groups_knockout') {
     const gm = groupMatches(b);

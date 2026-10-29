@@ -11,6 +11,7 @@ export const keys = {
   managed: (uid: string) => ['tournaments', 'managed', uid] as const,
   bundle: (id: string) => ['tournament', id] as const,
   contacts: (id: string) => ['tournament', id, 'contacts'] as const,
+  mine: ['my-applications'] as const,
 };
 
 export function useTournaments() {
@@ -33,6 +34,11 @@ export function useBundle(id: string, opts: { poll?: boolean } = {}) {
     refetchInterval: opts.poll ? 20_000 : false,
     retry: (n, e) => !(e instanceof AppError && e.code === 'NOT_FOUND') && n < 2,
   });
+}
+
+/** The current player's applications. Polled so a confirmation shows up without reloading. */
+export function useMyApplications(enabled: boolean) {
+  return useQuery({ queryKey: keys.mine, queryFn: () => service.listMyApplications(), enabled, refetchInterval: 30_000 });
 }
 
 export function useContacts(id: string, enabled: boolean) {
@@ -87,5 +93,6 @@ export function useInvalidateTournament(id: string) {
     qc.invalidateQueries({ queryKey: keys.bundle(id) }),
     qc.invalidateQueries({ queryKey: keys.list }),
     qc.invalidateQueries({ queryKey: keys.contacts(id) }),
+    qc.invalidateQueries({ queryKey: keys.mine }),
   ]);
 }

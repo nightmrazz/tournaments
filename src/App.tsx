@@ -8,6 +8,7 @@ import { AuthProvider } from '@/features/auth/AuthProvider';
 import { LanguageProvider } from '@/i18n';
 import { HomePage } from '@/pages/HomePage';
 import { LoginPage, NotFoundPage } from '@/pages/LoginPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 import { TournamentPage } from '@/pages/TournamentPage';
 import { TournamentsPage } from '@/pages/TournamentsPage';
 
@@ -44,6 +45,7 @@ export function App() {
                   <Route path="/tournaments" element={<TournamentsPage />} />
                   <Route path="/tournaments/:id" element={<TournamentPage />} />
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/admin" element={<RequireOrganizer><AdminDashboardPage /></RequireOrganizer>} />
                   <Route path="/admin/tournaments" element={<Navigate to="/admin" replace />} />
                   <Route path="/admin/tournaments/new" element={<RequireOrganizer><AdminNewTournamentPage /></RequireOrganizer>} />

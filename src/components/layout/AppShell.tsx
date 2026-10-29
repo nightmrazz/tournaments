@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/overlay';
 import { service } from '@/data';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { ApplicationNotifier } from '@/features/participants/ApplicationNotifier';
 import { LANGS, t, useLanguage } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -64,13 +65,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const links = (
     <>
       <NavLink to="/tournaments" className={navCls}>{t('Tournaments')}</NavLink>
+      {(service.mode === 'local' || user) && <NavLink to="/profile" className={navCls}>{t('My cabinet')}</NavLink>}
       {isOrganizer && <NavLink to="/admin" className={navCls}>{t('Organizer')}</NavLink>}
     </>
   );
   const account =
     service.mode === 'local' ? null : user ? (
       <div className="flex items-center gap-2">
-        <span className="hidden max-w-40 truncate text-sm text-muted lg:inline" title={user.email ?? undefined}>{user.displayName}</span>
+        <Link to="/profile" className="hidden max-w-40 truncate text-sm text-muted hover:text-accent lg:inline" title={t('My cabinet')}>{user.displayName}</Link>
         <Button variant="ghost" size="sm" onClick={signOut}><LogOut className="h-4 w-4" aria-hidden />{t('Sign out')}</Button>
       </div>
     ) : (
@@ -107,6 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
         )}
       </header>
+      <ApplicationNotifier />
       <main id="main" className="flex-1">{children}</main>
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-8 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">

@@ -16,6 +16,8 @@ and a public page that spectators can follow live.
   Participants, Standings (group format only), Matches (filter by stage, group and status), and Playoffs (bracket).
 - Self-registration with just a display name (plus optional contact). Names are unique per tournament; capacity, deadline and status are checked. Contact details are private.
 - Russian / English interface: RU-EN switch in the header, remembered per browser (defaults to the browser language). Strings live in `src/i18n/ru.ts`; a unit test fails if any UI string lacks a translation.
+- Paid registration (optional per tournament): the organizer sets the entry fee, payment details and a Telegram username for receipts. A player's registration becomes an application with an 8-character ID and the status "Awaiting payment"; after paying, the player sends the receipt (quoting the ID) to the organizer in Telegram and presses "I paid" → "Awaiting receipt check". The organizer confirms or rejects ("Payment not confirmed") in the Participants tab. Only confirmed applications are participants: they are public, count toward capacity and enter the draw. Players see their status on the tournament page and in My cabinet (`/profile`), and get an on-site notification when it changes. Email / Telegram-bot notifications are not included.
+- Nicknames: chosen at sign-up (unique, 3–24 letters/digits/_ . -) and changeable by the player in My cabinet.
 - Public pages refresh every 20 s, so scores entered by the organizer show up without a reload.
 
 **Organizer** (`/admin`)
@@ -148,7 +150,7 @@ Use it for development, demos and tests only. Never deploy it as a real event si
 ## Supabase setup
 
 1. Create a Supabase project (PostgreSQL 15+).
-2. Apply the migrations in `supabase/migrations/` in filename order (`20261028000000_init.sql`, then `20261029000000_teams.sql`). Either paste them into the SQL
+2. Apply the migrations in `supabase/migrations/` in filename order (`20261028000000_init.sql`, `20261029000000_teams.sql`, then `20261030000000_payments_nicknames.sql`). Either paste them into the SQL
    editor, or use the CLI (`supabase link`, then `supabase db push`).
 3. Authentication → Providers: enable **Email**. Decide whether email confirmation is required; the
    sign-up screen handles both cases. Add your site URL to Authentication → URL Configuration.

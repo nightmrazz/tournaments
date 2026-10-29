@@ -1,5 +1,5 @@
 import type { Mutation, RegistrationInput } from '@/engine';
-import type { Participant, ParticipantContact, Tournament, TournamentBundle, TournamentFormat, TournamentSettings, TournamentStatus, UserIdentity } from '@/types/domain';
+import type { Participant, ParticipantContact, RegistrationStatus, Tournament, TournamentBundle, TournamentFormat, TournamentSettings, TournamentStatus, UserIdentity } from '@/types/domain';
 
 export interface TournamentSummary extends Tournament {
   participantCount: number;
@@ -15,6 +15,12 @@ export interface TournamentInput {
   format: TournamentFormat;
   maxParticipants: number;
   settings: TournamentSettings;
+}
+
+/** A registration as seen by the player who made it (personal cabinet). */
+export interface MyApplication {
+  participant: Participant;
+  tournament: Pick<Tournament, 'id' | 'name' | 'status' | 'startsAt' | 'settings'>;
 }
 
 export interface ParticipantPatch {
@@ -39,6 +45,10 @@ export interface AuthApi {
   signIn(email: string, password: string): Promise<void>;
   signUp(email: string, password: string, displayName: string): Promise<{ needsConfirmation: boolean }>;
   signOut(): Promise<void>;
+  /** Change the signed-in player's nickname (unique, 3–24 chars). */
+  updateNickname(nickname: string): Promise<void>;
+  /** Whether a nickname is still free (for the sign-up form). */
+  nicknameAvailable(nickname: string): Promise<boolean>;
   onChange(cb: () => void): () => void;
 }
 
@@ -63,6 +73,12 @@ export interface DataService {
   updateParticipant(participantId: string, patch: ParticipantPatch): Promise<void>;
   removeParticipant(participantId: string): Promise<void>;
   listContacts(tournamentId: string): Promise<ParticipantContact[]>;
+  /** Organizer confirms or rejects a paid application (before the draw). */
+  setRegistrationStatus(participantId: string, status: RegistrationStatus): Promise<void>;
+  /** Applicant reports that the payment receipt was sent → awaiting_review. */
+  markReceiptSent(participantId: string): Promise<void>;
+  /** The current player's applications across tournaments (local mode: made in this browser). */
+  listMyApplications(): Promise<MyApplication[]>;
   /** Atomically applies an engine mutation if the tournament is still at `expectedVersion`. */
   applyMutation(tournamentId: string, expectedVersion: number, mutation: Mutation): Promise<void>;
 }

@@ -7,7 +7,7 @@ import { EngineError } from './errors';
 import { buildGroupStage, drawGroups, groupConfigProblems, type GroupDraw } from './groups';
 import type { IdFactory } from './ids';
 import { buildKnockout, entryPlacements, samePlacements, seedsForSingleElimination, seedsFromGroups } from './knockout';
-import { allowedTransitions, groupMatches, groupStageComplete, groupTables, knockoutMatches, podium, STATUS_LABEL } from './lifecycle';
+import { allowedTransitions, confirmedParticipants, groupMatches, groupStageComplete, groupTables, knockoutMatches, podium, STATUS_LABEL } from './lifecycle';
 import { BracketEditor, clearedResultPatch, hasResult, normalizeResult, type ResultInput } from './results';
 
 export interface Mutation {
@@ -68,19 +68,19 @@ function requireReadyToStart(b: TournamentBundle) {
 
 /** Produces a reviewable draw. Nothing is persisted until planGroupStage is called with it. */
 export function previewDraw(b: TournamentBundle, drawSeed: number): GroupDraw {
-  const problems = groupConfigProblems(b.participants.length, b.tournament.settings);
+  const problems = groupConfigProblems(confirmedParticipants(b).length, b.tournament.settings);
   if (problems.length) throw new EngineError('INVALID_CONFIG', problems.join(' '));
-  return drawGroups(b.participants, b.tournament.settings.groupCount, drawSeed);
+  return drawGroups(confirmedParticipants(b), b.tournament.settings.groupCount, drawSeed);
 }
 
 export function planGroupStage(b: TournamentBundle, draw: GroupDraw, ctx: CommandContext): CommandResult {
   if (b.tournament.format !== 'groups_knockout') throw new EngineError('INVALID_CONFIG', 'This tournament does not have a group stage.');
   requireReadyToStart(b);
-  const problems = groupConfigProblems(b.participants.length, b.tournament.settings);
+  const problems = groupConfigProblems(confirmedParticipants(b).length, b.tournament.settings);
   if (problems.length) throw new EngineError('INVALID_CONFIG', problems.join(' '));
   if (draw.length !== b.tournament.settings.groupCount) throw new EngineError('INVALID_CONFIG', 'The draw does not match the configured number of groups.');
   const drawn = draw.flat();
-  const ids = new Set(b.participants.map((p) => p.id));
+  const ids = new Set(confirmedParticipants(b).map((p) => p.id));
   if (drawn.length !== ids.size || drawn.some((id) => !ids.has(id)))
     throw new EngineError('INVALID_STATE', 'The participant list changed since the draw was made. Draw again.');
   const s = b.tournament.settings;
@@ -94,8 +94,8 @@ export function planGroupStage(b: TournamentBundle, draw: GroupDraw, ctx: Comman
 export function planSingleElimination(b: TournamentBundle, drawSeed: number, ctx: CommandContext): CommandResult {
   if (b.tournament.format !== 'single_elimination') throw new EngineError('INVALID_CONFIG', 'This tournament uses a group stage.');
   requireReadyToStart(b);
-  if (b.participants.length < 2) throw new EngineError('INVALID_CONFIG', 'At least 2 participants are needed.');
-  const seeds = seedsForSingleElimination(b.participants, drawSeed);
+  if (confirmedParticipants(b).length < 2) throw new EngineError('INVALID_CONFIG', 'At least 2 participants are needed.');
+  const seeds = seedsForSingleElimination(confirmedParticipants(b), drawSeed);
   const matches = buildKnockout(seeds, { tournamentId: b.tournament.id, thirdPlace: b.tournament.settings.thirdPlaceMatch, ids: ctx.ids, now: ctx.now });
   return { mutation: { ...emptyMutation(), insertMatches: matches, tournamentStatus: 'in_progress' }, warnings: [] };
 }

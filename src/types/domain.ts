@@ -17,6 +17,14 @@ export type TournamentFormat = (typeof TOURNAMENT_FORMATS)[number];
 export const MATCH_STATUSES = ['scheduled', 'in_progress', 'completed', 'postponed', 'cancelled'] as const;
 export type MatchStatus = (typeof MATCH_STATUSES)[number];
 
+/**
+ * Application lifecycle when the organizer requires an entry fee:
+ * awaiting_payment → (player says the receipt was sent) awaiting_review → confirmed | rejected.
+ * Without an entry fee, registrations are confirmed immediately.
+ */
+export const REGISTRATION_STATUSES = ['awaiting_payment', 'awaiting_review', 'confirmed', 'rejected'] as const;
+export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
+
 export type MatchStage = 'group' | 'knockout';
 export type Side = 'home' | 'away';
 
@@ -44,6 +52,14 @@ export interface TournamentSettings {
   stations: number;
   /** Seed used for random draws, so draws are reproducible. */
   drawSeed: number;
+  /** Players must pay an entry fee; the organizer confirms each application manually. */
+  requirePayment: boolean;
+  /** Free text shown to players, e.g. "7 000 ₸". */
+  entryFee: string;
+  /** Bank / card details for the transfer (shown after registering). */
+  paymentDetails: string;
+  /** Organizer's Telegram username (without @) that receives payment receipts. */
+  telegramUsername: string;
 }
 
 export interface Tournament {
@@ -73,6 +89,8 @@ export interface Participant {
   gamertag: string;
   /** Club/team assigned to this player by the organizer (e.g. "Real Madrid"). */
   team: string | null;
+  /** Only `confirmed` entries are participants; the others are applications awaiting payment. */
+  status: RegistrationStatus;
   /** Optional manual seed (1 = strongest). */
   seed: number | null;
   userId: string | null;
@@ -158,4 +176,8 @@ export const DEFAULT_SETTINGS: TournamentSettings = {
   requireContact: false,
   stations: 4,
   drawSeed: 1,
+  requirePayment: false,
+  entryFee: '',
+  paymentDetails: '',
+  telegramUsername: '',
 };

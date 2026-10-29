@@ -4,14 +4,15 @@ import { Bracket, ChampionBanner } from '@/components/bracket/Bracket';
 import { MatchCard, nameMap, TeamLine } from '@/components/matches/MatchCard';
 import { GroupTable } from '@/components/standings/GroupTable';
 import { EmptyState, Select } from '@/components/ui/primitives';
-import { groupTables, knockoutRounds, knockoutShapeNote, podium, roundName } from '@/engine';
+import { confirmedParticipants, groupTables, knockoutRounds, knockoutShapeNote, podium, roundName } from '@/engine';
 import { t, tr } from '@/i18n';
 import type { Match, MatchStatus, Tiebreaker, TournamentBundle } from '@/types/domain';
 
 export function ParticipantsView({ b }: { b: TournamentBundle }) {
-  if (!b.participants.length) return <EmptyState icon={<Users className="h-8 w-8" />} title={t('No participants yet')} description={t('Registered players will appear here.')} />;
+  const players = confirmedParticipants(b);
+  if (!players.length) return <EmptyState icon={<Users className="h-8 w-8" />} title={t('No participants yet')} description={t('Registered players will appear here.')} />;
   const groupOf = new Map(b.groupMembers.map((gm) => [gm.participantId, b.groups.find((g) => g.id === gm.groupId)?.name]));
-  const sorted = [...b.participants].sort((a, c) => a.createdAt.localeCompare(c.createdAt));
+  const sorted = [...players].sort((a, c) => a.createdAt.localeCompare(c.createdAt));
   return (
     <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {sorted.map((p, i) => (
