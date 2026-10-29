@@ -158,7 +158,7 @@ export function Tabs({ tabs, value, onChange, label }: { tabs: TabDef[]; value: 
           >
             {tab.label}
             {tab.count !== undefined && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[11px] tabular text-muted">{tab.count}</span>}
-            {active && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full neon-gradient glow-sm" aria-hidden />}
+            {active && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" aria-hidden />}
           </button>
         );
       })}

@@ -24,7 +24,7 @@ export function TournamentCard({ t: tour }: { t: TournamentSummary }) {
   const fill = Math.min(100, Math.round((tour.participantCount / tour.maxParticipants) * 100));
   return (
     <Link to={`/tournaments/${tour.id}`} className="group block rounded-[var(--radius-card)] focus-visible:outline-offset-4">
-      <Card className="flex h-full flex-col p-4 transition-[border-color,box-shadow] duration-200 group-hover:border-accent/50 group-hover:glow-sm">
+      <Card className="flex h-full flex-col p-4 transition-colors duration-150 group-hover:border-line-strong group-hover:bg-surface-2">
         <div className="flex items-start justify-between gap-3">
           <StatusBadge status={tour.status} />
           <span className="text-xs text-subtle">{t(FORMAT_LABEL[tour.format])}</span>
@@ -40,7 +40,7 @@ export function TournamentCard({ t: tour }: { t: TournamentSummary }) {
             <ChevronRight className="h-4 w-4 text-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-accent" aria-hidden />
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={fill} aria-valuemin={0} aria-valuemax={100} aria-label={t('Slots filled')}>
-            <div className="h-full rounded-full neon-gradient" style={{ width: `${fill}%` }} />
+            <div className="h-full rounded-full bg-accent/70" style={{ width: `${fill}%` }} />
           </div>
         </div>
       </Card>
@@ -69,7 +69,7 @@ export function StageProgress({ steps }: { steps: StageStep[] }) {
           className={cn(
             'relative flex min-w-40 shrink-0 items-center gap-3 rounded-[var(--radius-control)] border px-3 py-2.5 sm:min-w-0',
             s.state === 'done' && 'border-line bg-surface',
-            s.state === 'current' && 'border-accent/60 bg-accent/8 glow-sm',
+            s.state === 'current' && 'border-accent/50 bg-surface-2',
             s.state === 'upcoming' && 'border-line border-dashed',
           )}
         >

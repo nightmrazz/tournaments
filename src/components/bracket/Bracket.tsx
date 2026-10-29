@@ -64,9 +64,9 @@ export function ChampionBanner({ podium, names }: { podium: Podium; names: NameM
   if (!podium.champion) return null;
   const c = names.get(podium.champion);
   return (
-    <div className="relative overflow-hidden rounded-[var(--radius-card)] border border-accent/50 bg-gradient-to-br from-accent/18 via-surface to-neon/8 glow p-5 sm:p-6" data-testid="champion-banner">
-      <Trophy className="absolute -right-4 -top-4 h-32 w-32 text-accent/8" aria-hidden />
-      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-accent text-glow"><Crown className="h-4 w-4" aria-hidden />{t('Champion')}</p>
+    <div className="relative overflow-hidden rounded-[var(--radius-card)] border border-line-strong bg-surface p-5 sm:p-6" data-testid="champion-banner">
+      <Trophy className="absolute -right-4 -top-4 h-32 w-32 text-fg/[0.04]" aria-hidden />
+      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-accent"><Crown className="h-4 w-4" aria-hidden />{t('Champion')}</p>
       <p className="mt-2 font-display text-3xl font-bold sm:text-4xl">{c?.displayName}</p>
       {c?.team && <p className="text-sm text-muted">{c.team}</p>}
       <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">

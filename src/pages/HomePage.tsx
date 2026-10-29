@@ -50,7 +50,7 @@ export function HomePage() {
         <PageContainer className="grid gap-8 py-10 sm:py-14 lg:grid-cols-[1.2fr_1fr] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">{t('EA SPORTS FC 27 · Local & campus events')}</p>
-            <h1 className="mt-3 text-4xl font-bold leading-[1.05] sm:text-5xl">{t('Run the bracket.')}<br /><span className="neon-text">{t('Not the spreadsheet.')}</span></h1>
+            <h1 className="mt-3 text-4xl font-bold leading-[1.05] sm:text-5xl">{t('Run the bracket.')}<br /><span className="text-muted">{t('Not the spreadsheet.')}</span></h1>
             <p className="mt-4 max-w-xl text-base text-muted">
               {t('Registration, group draws, fixtures, live standings and knockout brackets for FC 27 tournaments — with results that update for every player in the room.')}
             </p>

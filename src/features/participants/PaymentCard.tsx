@@ -92,7 +92,7 @@ export function PaymentCard({ participant: p, tournament, className }: {
             <div className="mt-2 flex flex-wrap gap-2">
               {tg && (
                 <a href={`https://t.me/${encodeURIComponent(tg)}`} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-control)] bg-accent px-4 text-sm font-semibold text-accent-ink glow-sm hover:bg-accent-strong">
+                  className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-control)] bg-accent px-4 text-sm font-semibold text-accent-ink hover:bg-accent-strong">
                   <Send className="h-4 w-4" aria-hidden />{t('Send receipt in Telegram')} <span className="font-normal">@{tg}</span>
                 </a>
               )}
