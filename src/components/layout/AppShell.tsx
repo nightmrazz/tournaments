@@ -12,9 +12,9 @@ import { cn } from '@/lib/utils';
 export function Logo({ className }: { className?: string }) {
   return (
     <Link to="/" className={cn('flex items-center gap-2.5 font-display font-bold tracking-tight', className)} aria-label={t('temcch tournaments home')}>
-      <span className="grid h-8 w-8 place-items-center rounded-lg bg-fg text-bg">
-        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden><path d="M4 4h16v4h-6v13h-4V8H4z" fill="currentColor" /></svg>
-      </span>
+      {/* The brand mark is public/favicon.svg — replace that file to change the logo everywhere. */}
+      <img src="/favicon.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
+
       <span className="text-lg leading-none">temcch<span className="ml-1.5 hidden font-medium text-muted min-[400px]:inline">tournaments</span></span>
     </Link>
   );
