@@ -10,6 +10,8 @@ export function makeParticipants(n: number, tournamentId = 't1'): Participant[] 
     displayName: `Player ${i + 1}`,
     gamertag: `Player ${i + 1}`,
     team: null,
+    reservedUntil: null,
+    statusChangedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(),
     status: 'confirmed' as const,
     seed: null,
     userId: null,

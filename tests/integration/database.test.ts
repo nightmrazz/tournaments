@@ -213,49 +213,134 @@ describe('structural changes through apply_tournament_mutation', () => {
   });
 });
 
-describe('paid registration', () => {
-  let paidId = '';
-  const settings = JSON.stringify({ groupCount: 1, advancePerGroup: 1, requirePayment: true, entryFee: '7 000 ₸', paymentDetails: 'Kaspi 1234', telegramUsername: 'temcch_org' });
+describe('flexible registration (database)', () => {
+  let tid2 = '';
+  const U = Array.from({ length: 6 }, (_, i) => `55555555-5555-4555-8555-00000000000${i}`);
+  const settings = (extra: Record<string, unknown> = {}) => JSON.stringify({
+    groupCount: 1, advancePerGroup: 1, requirePayment: true, entryFee: '7 000 ₸', paymentDetails: 'Kaspi 1234',
+    telegramUsername: 'temcch_org', reservationMinutes: 30, waitlistEnabled: false, ...extra,
+  });
+  const register = (u: string, name: string) => as(u, (tx) => tx.query<{ id: string }>('select register_for_tournament($1, $2) as id', [tid2, name]));
+  const statusOf = async (u: string) =>
+    (await db.query<{ id: string; payment_status: string; reserved_until: string | null }>('select id, payment_status, reserved_until from participants where tournament_id = $1 and user_id = $2', [tid2, u])).rows[0];
+  const setSettings = (extra: Record<string, unknown>) =>
+    as(ORGANIZER, (tx) => tx.query(`update tournaments set settings = settings || $2::jsonb where id = $1`, [tid2, JSON.stringify(extra)]));
 
-  it('creates applications that await payment and are hidden from the public', async () => {
+  beforeAll(async () => {
+    for (const id of U) await db.query('insert into auth.users (id, email) values ($1, $2)', [id, `${id.slice(-4)}@flex.test`]);
     const r = await as(ORGANIZER, (tx) => tx.query<{ id: string }>(
-      `insert into tournaments (name, format, max_participants, settings, owner_id, status) values ('Paid Cup', 'single_elimination', 2, $1::jsonb, $2, 'draft') returning id`,
-      [settings, ORGANIZER]));
-    paidId = r.rows[0].id;
-    await as(ORGANIZER, (tx) => tx.query(`update tournaments set status = 'registration_open' where id = $1`, [paidId]));
-    for (const [i, p] of players.slice(0, 3).entries()) {
-      await as(p, (tx) => tx.query(`select register_for_tournament($1, $2)`, [paidId, `Payer ${i}`]));
-    }
-    const rows = await db.query<{ payment_status: string }>('select payment_status from participants where tournament_id = $1', [paidId]);
-    expect(rows.rows.map((x) => x.payment_status)).toEqual(['awaiting_payment', 'awaiting_payment', 'awaiting_payment']);
-    expect((await as('anon', (tx) => tx.query('select id from participants where tournament_id = $1', [paidId]))).rows).toHaveLength(0);
-    expect((await as(STRANGER, (tx) => tx.query('select id from participants where tournament_id = $1', [paidId]))).rows).toHaveLength(0);
-    expect((await as(players[0], (tx) => tx.query('select id from participants where tournament_id = $1', [paidId]))).rows).toHaveLength(1);
-    expect((await as(ORGANIZER, (tx) => tx.query('select id from participants where tournament_id = $1', [paidId]))).rows).toHaveLength(3);
+      `insert into tournaments (name, format, max_participants, settings, owner_id) values ('Flex Cup', 'single_elimination', 2, $1::jsonb, $2) returning id`,
+      [settings(), ORGANIZER]));
+    tid2 = r.rows[0].id;
+    await as(ORGANIZER, (tx) => tx.query(`update tournaments set status = 'registration_open' where id = $1`, [tid2]));
   });
 
-  it('lets only the applicant report the receipt, and never self-confirm', async () => {
-    const mine = await db.query<{ id: string }>('select id from participants where tournament_id = $1 and user_id = $2', [paidId, players[0]]);
-    const pid = mine.rows[0].id;
-    await expect(as(players[1], (tx) => tx.query('select mark_receipt_sent($1)', [pid]))).rejects.toThrow(/already being reviewed/);
-    await as(players[0], (tx) => tx.query('select mark_receipt_sent($1)', [pid]));
-    await expect(as(players[0], (tx) => tx.query('select mark_receipt_sent($1)', [pid]))).rejects.toThrow(/already being reviewed/);
-    const upd = await as(players[0], (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [pid]));
-    expect(upd.affectedRows ?? 0).toBe(0);
-    const r = await db.query<{ payment_status: string }>('select payment_status from participants where id = $1', [pid]);
-    expect(r.rows[0].payment_status).toBe('awaiting_review');
+  it('1. registration with free places reserves a place for the payment window', async () => {
+    await register(U[0], 'Alpha');
+    const s = await statusOf(U[0]);
+    expect(s.payment_status).toBe('awaiting_payment');
+    const minutes = (new Date(s.reserved_until as string).getTime() - Date.now()) / 60_000;
+    expect(minutes).toBeGreaterThan(28);
+    expect(minutes).toBeLessThanOrEqual(30);
   });
 
-  it('organizer confirms within capacity; confirmed players become public', async () => {
-    const ids = (await db.query<{ id: string }>('select id from participants where tournament_id = $1 order by created_at', [paidId])).rows.map((x) => x.id);
-    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [ids[0]]));
-    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [ids[1]]));
-    await expect(as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [ids[2]]))).rejects.toThrow(/full/);
-    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'rejected' where id = $1`, [ids[2]]));
-    expect((await as('anon', (tx) => tx.query('select id from participants where tournament_id = $1', [paidId]))).rows).toHaveLength(2);
-    // A rejected player can send the receipt again.
-    await as(players[2], (tx) => tx.query('select mark_receipt_sent($1)', [ids[2]]));
-    await as(ORGANIZER, (tx) => tx.query('delete from tournaments where id = $1', [paidId]));
+  it('3. two players racing for the last place: exactly one gets it', async () => {
+    const results = await Promise.allSettled([register(U[1], 'Bravo'), register(U[2], 'Charlie')]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(String(rejected.reason)).toMatch(/full/);
+    const held = await db.query<{ n: number }>('select places_held($1) as n', [tid2]);
+    expect(held.rows[0].n).toBe(2);
+  });
+
+  it('2. when full: refused without a waitlist, waitlisted with one (and shown publicly as counts only)', async () => {
+    await expect(register(U[3], 'Delta')).rejects.toThrow(/full/);
+    await setSettings({ waitlistEnabled: true });
+    await register(U[3], 'Delta');
+    expect((await statusOf(U[3])).payment_status).toBe('waitlisted');
+    const pos = await as(U[3], (tx) => tx.query<{ p: number }>('select waitlist_position(id) as p from participants where user_id = $1', [U[3]]));
+    expect(pos.rows[0].p).toBe(1);
+    const counts = await as('anon', (tx) => tx.query<{ confirmed: number; holding: number; waitlisted: number }>('select * from tournament_counts($1)', [tid2]));
+    expect(counts.rows[0]).toEqual({ confirmed: 0, holding: 2, waitlisted: 1 });
+    expect((await as('anon', (tx) => tx.query('select id from participants where tournament_id = $1', [tid2]))).rows).toHaveLength(0);
+  });
+
+  it('4. an expired reservation releases its place; a new player can take it', async () => {
+    const winner = (await statusOf(U[1]))?.id ? U[1] : U[2];
+    await db.query(`update participants set reserved_until = now() - interval '1 minute' where tournament_id = $1 and user_id = $2`, [tid2, winner]);
+    expect((await db.query<{ n: number }>('select places_held($1) as n', [tid2])).rows[0].n).toBe(1);
+    await setSettings({ waitlistEnabled: false });
+    await register(U[4], 'Echo');
+    expect((await statusOf(U[4])).payment_status).toBe('awaiting_payment');
+    // The expired player now finds no place: with no waitlist the receipt is refused…
+    const p = await statusOf(winner);
+    await expect(as(winner, (tx) => tx.query('select mark_receipt_sent($1)', [p.id]))).rejects.toThrow(/No places/);
+    // …with the waitlist on, they join it instead of being silently dropped.
+    await setSettings({ waitlistEnabled: true });
+    const r = await as(winner, (tx) => tx.query<{ s: string }>('select mark_receipt_sent($1) as s', [p.id]));
+    expect(r.rows[0].s).toBe('waitlisted');
+  });
+
+  it('5–6. receipt → under review (place kept) → organizer confirms', async () => {
+    const p = await statusOf(U[0]);
+    const r = await as(U[0], (tx) => tx.query<{ s: string }>('select mark_receipt_sent($1) as s', [p.id]));
+    expect(r.rows[0].s).toBe('awaiting_review');
+    expect((await statusOf(U[0])).reserved_until).toBeNull();
+    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [p.id]));
+    expect((await statusOf(U[0])).payment_status).toBe('confirmed');
+    expect((await as('anon', (tx) => tx.query('select display_name from participants where tournament_id = $1', [tid2]))).rows).toEqual([{ display_name: 'Alpha' }]);
+  });
+
+  it('7. organizer rejects a payment; the player may send the receipt again', async () => {
+    const p = await statusOf(U[4]);
+    await as(U[4], (tx) => tx.query('select mark_receipt_sent($1)', [p.id]));
+    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'rejected' where id = $1`, [p.id]));
+    expect((await statusOf(U[4])).payment_status).toBe('rejected');
+    const r = await as(U[4], (tx) => tx.query<{ s: string }>('select mark_receipt_sent($1) as s', [p.id]));
+    expect(r.rows[0].s).toBe('awaiting_review');
+  });
+
+  it('12. players cannot confirm, waitlist-jump or touch others’ registrations', async () => {
+    const mine = await statusOf(U[3]);
+    const self = await as(U[3], (tx) => tx.query(`update participants set payment_status = 'confirmed' where id = $1`, [mine.id]));
+    expect(self.affectedRows ?? 0).toBe(0);
+    const other = await statusOf(U[4]);
+    await expect(as(U[3], (tx) => tx.query('select mark_receipt_sent($1)', [other.id]))).rejects.toThrow(/not found/);
+    await expect(as(U[3], (tx) => tx.query('select cancel_my_registration($1)', [other.id]))).rejects.toThrow(/not found or already cancelled/);
+    const stranger = await as(STRANGER, (tx) => tx.query(`update participants set payment_status = 'cancelled' where id = $1`, [other.id]));
+    expect(stranger.affectedRows ?? 0).toBe(0);
+    expect((await as(STRANGER, (tx) => tx.query<{ p: number | null }>('select waitlist_position($1) as p', [mine.id]))).rows[0]?.p ?? null).toBeNull();
+    expect((await statusOf(U[3])).payment_status).toBe('waitlisted');
+  });
+
+  it('8. a confirmed player cancels; the organizer offers the place to the next waitlisted player', async () => {
+    // Places now: Alpha confirmed, Echo under review → full.
+    const next = await statusOf(U[3]);
+    await expect(as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'awaiting_payment', reserved_until = now() + interval '30 minutes' where id = $1`, [next.id]))).rejects.toThrow(/full/);
+    const alpha = await statusOf(U[0]);
+    await as(U[0], (tx) => tx.query('select cancel_my_registration($1)', [alpha.id]));
+    expect((await statusOf(U[0])).payment_status).toBe('cancelled');
+    await as(ORGANIZER, (tx) => tx.query(`update participants set payment_status = 'awaiting_payment', reserved_until = now() + interval '30 minutes' where id = $1`, [next.id]));
+    expect((await statusOf(U[3])).payment_status).toBe('awaiting_payment'); // offered, still has to pay — not confirmed
+  });
+
+  it('10. capacity changes: lowering below confirmed/under-review is refused; raising frees places', async () => {
+    await expect(setSettings({ minParticipants: 5 })).rejects.toThrow(/minimum ≤ target ≤ maximum/);
+    await as(ORGANIZER, (tx) => tx.query('update tournaments set max_participants = 4 where id = $1', [tid2]));
+    await setSettings({ minParticipants: 2, targetParticipants: 4 });
+    await register(U[5], 'Foxtrot');
+    expect((await statusOf(U[5])).payment_status).toBe('awaiting_payment');
+  });
+
+  it('9. paused, not-yet-open and closed registration are refused by the server', async () => {
+    await setSettings({ registrationPaused: true });
+    await expect(register(STRANGER, 'Golf')).rejects.toThrow(/paused/);
+    await setSettings({ registrationPaused: false, registrationOpensAt: new Date(Date.now() + 3_600_000).toISOString() });
+    await expect(register(STRANGER, 'Golf')).rejects.toThrow(/not opened/);
+    await setSettings({ registrationOpensAt: null });
+    await as(ORGANIZER, (tx) => tx.query(`update tournaments set status = 'registration_closed' where id = $1`, [tid2]));
+    await expect(register(STRANGER, 'Golf')).rejects.toThrow(/closed/);
+    await as(ORGANIZER, (tx) => tx.query('delete from tournaments where id = $1', [tid2]));
   });
 });
 

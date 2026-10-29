@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applicationCode, applyMutation, assertCanAssignTeam, assertCanMarkReceiptSent, assertCanRegister, assertCanSetRegistrationStatus, EngineError, initialRegistrationStatus, finalMatch, groupStageComplete, groupTables, knockoutMatches, knockoutRounds,
+  applyMutation, assertCanAssignTeam, assertCanRegister, EngineError, finalMatch, groupStageComplete, groupTables, knockoutMatches, knockoutRounds,
   planGroupStage, planKnockoutFromGroups, planMatchChange, planResetGroupStage, planSingleElimination, planStatusChange,
   podium, previewDraw, stageProgress, type Mutation,
 } from '@/engine';
@@ -191,48 +191,6 @@ describe('registration rules', () => {
     const tc = { ...t, settings: { ...t.settings, requireContact: true } };
     expect(() => reg({ displayName: 'X' }, 'n', tc)).toThrow(/contact/);
     expect(() => reg({ displayName: 'X', contact: '@x' }, 'n', tc)).not.toThrow();
-  });
-});
-
-describe('paid registration', () => {
-  const paid = makeTournament({ status: 'registration_open', maxParticipants: 2 }, { requirePayment: true, entryFee: '7 000 ₸' });
-
-  it('starts players as unpaid applications; organizer-added and free registrations are confirmed', () => {
-    expect(initialRegistrationStatus(paid, false)).toBe('awaiting_payment');
-    expect(initialRegistrationStatus(paid, true)).toBe('confirmed');
-    expect(initialRegistrationStatus(makeTournament(), false)).toBe('confirmed');
-  });
-
-  it('counts only confirmed participants toward capacity', () => {
-    const ps: Participant[] = makeParticipants(3).map((p, i) => ({ ...p, status: i === 0 ? 'confirmed' : 'awaiting_review' }));
-    expect(() => assertCanRegister(paid, ps, { displayName: 'New' }, { userId: null, asOrganizer: false })).not.toThrow();
-    expect(() => assertCanSetRegistrationStatus(paid, ps, ps[1], 'confirmed', false)).not.toThrow();
-    const full = ps.map((p, i) => (i < 2 ? { ...p, status: 'confirmed' as const } : p));
-    expect(() => assertCanSetRegistrationStatus(paid, full, full[2], 'confirmed', false)).toThrow(/full/);
-    expect(() => assertCanSetRegistrationStatus(paid, full, full[2], 'rejected', false)).not.toThrow();
-    expect(() => assertCanSetRegistrationStatus(paid, ps, ps[1], 'confirmed', true)).toThrow(/after the draw/);
-  });
-
-  it('lets the player report a receipt only while unpaid or after a rejection', () => {
-    const p = makeParticipants(1)[0];
-    expect(() => assertCanMarkReceiptSent({ ...p, status: 'awaiting_payment' })).not.toThrow();
-    expect(() => assertCanMarkReceiptSent({ ...p, status: 'rejected' })).not.toThrow();
-    expect(() => assertCanMarkReceiptSent({ ...p, status: 'awaiting_review' })).toThrow();
-    expect(() => assertCanMarkReceiptSent({ ...p, status: 'confirmed' })).toThrow();
-  });
-
-  it('draws only confirmed participants into groups', () => {
-    const b = makeBundle(10, {}, { groupCount: 2 });
-    b.participants = b.participants.map((p, i) => (i >= 8 ? { ...p, status: 'awaiting_review' } : p));
-    const drawn = previewDraw(b, 3).flat();
-    expect(drawn).toHaveLength(8);
-    expect(drawn).not.toContain('p09');
-    const after = apply(b, planGroupStage(b, previewDraw(b, 3), ctx()).mutation);
-    expect(after.groupMembers).toHaveLength(8);
-  });
-
-  it('gives every application a short, stable ID', () => {
-    expect(applicationCode('4f7a1c9e-1234-4abc-8def-000000000000')).toBe('4F7A1C9E');
   });
 });
 

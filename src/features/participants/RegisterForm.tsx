@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/overlay';
 import { service } from '@/data';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { keys, useMyApplications } from '@/features/tournaments/queries';
-import { applicationCode, confirmedParticipants, registrationState } from '@/engine';
+import { applicationCode, capacityOf, registrationState } from '@/engine';
 import { t, tr } from '@/i18n';
 import { errorMessage } from '@/lib/utils';
 import type { TournamentBundle } from '@/types/domain';
@@ -47,17 +47,19 @@ export function RegisterForm({ b }: { b: TournamentBundle }) {
     defaultValues: { displayName: service.mode === 'supabase' ? user?.displayName ?? '' : '', contact: '' },
   });
 
-  const confirmedCount = confirmedParticipants(b).length;
-  const state = registrationState(tour, confirmedCount);
+  const counts = capacityOf(b);
+  const state = registrationState(tour, counts.holding);
+  const free = Math.max(0, tour.maxParticipants - counts.holding);
+  const drawn = b.matches.length > 0;
   const own = service.mode === 'supabase' && user ? b.participants.find((p) => p.userId === user.id) : undefined;
   const localMine = (mine.data ?? []).filter((a) => a.tournament.id === tour.id).map((a) => a.participant);
 
   // A signed-in player has at most one application per tournament: show its status instead of the form.
-  if (own) return <PaymentCard participant={own} tournament={tour} />;
+  if (own) return <PaymentCard participant={own} tournament={tour} drawn={drawn} />;
   if (!state.open) {
     return (
       <div className="space-y-3">
-        {localMine.map((p) => <PaymentCard key={p.id} participant={p} tournament={tour} />)}
+        {localMine.map((p) => <PaymentCard key={p.id} participant={p} tournament={tour} drawn={drawn} />)}
         <Alert tone="warning" title={t('Registration unavailable')}>{tr(state.reason ?? '')}</Alert>
       </div>
     );
@@ -77,9 +79,11 @@ export function RegisterForm({ b }: { b: TournamentBundle }) {
     try {
       const p = await service.register(tour.id, { displayName: v.displayName, contact: v.contact || null });
       reset({ displayName: '', contact: '' });
-      toast('success', p.status === 'confirmed'
+      toast(p.status === 'waitlisted' ? 'warning' : 'success', p.status === 'confirmed'
         ? t('{name} is registered.', { name: p.displayName })
-        : t('Application {code} sent. Follow the payment instructions.', { code: applicationCode(p.id) }));
+        : p.status === 'waitlisted'
+          ? t('All places are taken — {name} was added to the waitlist.', { name: p.displayName })
+          : t('Application {code} sent. Follow the payment instructions.', { code: applicationCode(p.id) }));
       await Promise.all([
         qc.invalidateQueries({ queryKey: keys.bundle(tour.id) }),
         qc.invalidateQueries({ queryKey: keys.list }),
@@ -92,9 +96,15 @@ export function RegisterForm({ b }: { b: TournamentBundle }) {
 
   return (
     <div className="space-y-4">
-      {localMine.map((p) => <PaymentCard key={p.id} participant={p} tournament={tour} />)}
+      {localMine.map((p) => <PaymentCard key={p.id} participant={p} tournament={tour} drawn={drawn} />)}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate aria-label={t('Register for this tournament')}>
-        {paid && (
+        {state.waitlistOnly && (
+          <Alert tone="warning" title={t('All places are taken')}>
+            {t('You can still apply: you will join the waitlist and the organizer can offer you a place if one frees up. Do not pay until you are offered a place.')}
+          </Alert>
+        )}
+        {state.late && <p className="text-xs text-warning">{t('The deadline has passed, but the organizer still accepts late registrations.')}</p>}
+        {paid && !state.waitlistOnly && (
           <Alert tone="info" title={t('Entry fee: {fee}', { fee: tour.settings.entryFee || '—' })}>
             {t('After you submit the form you will see the payment details and your application ID. Your place is confirmed once the organizer checks the receipt.')}
           </Alert>
@@ -109,8 +119,11 @@ export function RegisterForm({ b }: { b: TournamentBundle }) {
           </Field>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-subtle tabular">{t('{left} of {max} places left', { left: tour.maxParticipants - confirmedCount, max: tour.maxParticipants })}</p>
-          <Button type="submit" variant="primary" loading={isSubmitting}>{paid ? t('Submit application') : t('Register')}</Button>
+          <p className="text-xs text-subtle tabular" data-testid="places-left">
+            {t('Confirmed: {n} · free places: {free} of {max}', { n: counts.confirmed, free, max: tour.maxParticipants })}
+            {counts.waitlisted > 0 && ' · ' + t('waitlist: {n}', { n: counts.waitlisted })}
+          </p>
+          <Button type="submit" variant="primary" loading={isSubmitting}>{state.waitlistOnly ? t('Join the waitlist') : paid ? t('Submit application') : t('Register')}</Button>
         </div>
       </form>
     </div>

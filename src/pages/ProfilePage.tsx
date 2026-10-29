@@ -83,7 +83,7 @@ export function ProfilePage() {
                 </div>
                 <RegistrationStatusBadge status={participant.status} />
               </div>
-              <PaymentCard participant={participant} tournament={tournament} />
+              <PaymentCard participant={participant} tournament={tournament} drawn={!['draft', 'registration_open', 'registration_closed'].includes(tournament.status)} />
             </Card>
           ))}
       </section>

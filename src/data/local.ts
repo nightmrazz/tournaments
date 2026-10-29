@@ -4,8 +4,8 @@
 // change anything. It exists for development, demos and end-to-end tests only.
 
 import {
-  applyMutation as applyToBundle, assertCanAssignTeam, assertCanMarkReceiptSent, assertCanRegister, assertCanRemoveParticipant, assertCanSetRegistrationStatus,
-  EngineError, initialRegistrationStatus, isConfirmed, normalizeName, planStatusChange, uuid, type Mutation,
+  applyMutation as applyToBundle, assertCanAssignTeam, assertCanCancelOwn, assertCanRemoveParticipant, countCapacity,
+  EngineError, isConfirmed, normalizeName, planAdminAction, planReceiptSent, planRegistration, planStatusChange, uuid, waitlistPosition, type Mutation,
 } from '@/engine';
 import type { Group, GroupMember, Match, Participant, ParticipantContact, Tournament, TournamentBundle, UserIdentity } from '@/types/domain';
 import { AppError, type AuthApi, type DataService, type MyApplication, type TournamentInput, type TournamentSummary } from './service';
@@ -30,7 +30,7 @@ function load(): LocalDb {
     if (!raw) return empty();
     const db = { ...empty(), ...(JSON.parse(raw) as LocalDb) };
     // Data saved before teams / paid registration existed lacks those fields.
-    db.participants = db.participants.map((p) => ({ ...p, team: p.team ?? null, status: p.status ?? 'confirmed' }));
+    db.participants = db.participants.map((p) => ({ ...p, team: p.team ?? null, status: p.status ?? 'confirmed', reservedUntil: p.reservedUntil ?? null, statusChangedAt: p.statusChangedAt ?? p.createdAt }));
     return db;
   } catch {
     return empty();
@@ -117,7 +117,10 @@ export function createLocalService(): DataService {
       return db.tournaments.filter((t) => t.ownerId === LOCAL_USER.id).map((t) => summary(db, t));
     }),
 
-    getBundle: (id) => wrap(() => bundleOf(load(), id)),
+    getBundle: (id) => wrap(() => {
+      const b = bundleOf(load(), id);
+      return b && { ...b, counts: countCapacity(b.participants) };
+    }),
 
     createTournament: (input: TournamentInput) => wrap(() => {
       const db = load();
@@ -140,7 +143,11 @@ export function createLocalService(): DataService {
           s.doubleRoundRobin !== t.settings.doubleRoundRobin || s.thirdPlaceMatch !== t.settings.thirdPlaceMatch));
         if (structural) throw new AppError('Format and structure settings cannot change after fixtures exist.');
       }
-      const confirmed = b.participants.filter(isConfirmed).length;
+      const confirmed = b.participants.filter((p) => isConfirmed(p) || p.status === 'awaiting_review').length;
+      const s2 = input.settings ?? t.settings;
+      const max = input.maxParticipants ?? t.maxParticipants;
+      if (s2.minParticipants > max || s2.targetParticipants > max || (s2.minParticipants && s2.targetParticipants && s2.minParticipants > s2.targetParticipants))
+        throw new AppError('Capacity must satisfy minimum ≤ target ≤ maximum.');
       if (input.maxParticipants !== undefined && input.maxParticipants < confirmed)
         throw new AppError(`Capacity cannot be lower than the current number of participants (${confirmed}).`);
       const next: Tournament = { ...t, ...input, updatedAt: new Date().toISOString() };
@@ -209,13 +216,12 @@ export function createLocalService(): DataService {
       save(db);
     }),
 
-    setRegistrationStatus: (participantId, status) => wrap(() => {
+    registrationAction: (participantId, action) => wrap(() => {
       const db = load();
       const p = db.participants.find((x) => x.id === participantId);
       if (!p) throw new AppError('Participant not found.');
       const b = bundleOf(db, p.tournamentId) as TournamentBundle;
-      assertCanSetRegistrationStatus(b.tournament, b.participants, p, status, b.matches.length > 0);
-      p.status = status;
+      setStatus(p, planAdminAction(b.tournament, b.participants, p, action, b.matches.length > 0));
       save(db);
     }),
 
@@ -224,10 +230,25 @@ export function createLocalService(): DataService {
       const p = db.participants.find((x) => x.id === participantId);
       if (!p) throw new AppError('Participant not found.');
       const b = bundleOf(db, p.tournamentId) as TournamentBundle;
-      if (b.matches.length) throw new AppError('Registration status cannot change after the draw.');
-      assertCanMarkReceiptSent(p);
-      p.status = 'awaiting_review';
+      setStatus(p, planReceiptSent(b.tournament, b.participants, p, b.matches.length > 0));
       save(db);
+      return p.status;
+    }),
+
+    cancelMyRegistration: (participantId) => wrap(() => {
+      const db = load();
+      const p = db.participants.find((x) => x.id === participantId);
+      if (!p || !myIds().includes(p.id)) throw new AppError('Participant not found.');
+      const b = bundleOf(db, p.tournamentId) as TournamentBundle;
+      assertCanCancelOwn(b.tournament, p, b.matches.length > 0);
+      setStatus(p, { status: 'cancelled', reservedUntil: null });
+      save(db);
+    }),
+
+    waitlistPosition: (participantId) => wrap(() => {
+      const db = load();
+      const p = db.participants.find((x) => x.id === participantId);
+      return p ? waitlistPosition(db.participants.filter((x) => x.tournamentId === p.tournamentId), p.id) : null;
     }),
 
     listMyApplications: () => wrap(() => {
@@ -264,17 +285,24 @@ export function createLocalService(): DataService {
     const b = bundleOf(db, tournamentId);
     if (!b || (b.tournament.status === 'draft' && !asOrganizer)) throw new AppError('Tournament not found.');
     if (b.matches.length) throw new AppError('Participants cannot be added after fixtures have been generated.');
-    assertCanRegister(b.tournament, b.participants, input, { userId: null, asOrganizer });
+    const outcome = planRegistration(b.tournament, b.participants, input, { userId: null, asOrganizer });
+    const now = new Date().toISOString();
     const p: Participant = {
       id: uuid(), tournamentId, displayName: input.displayName.trim(), gamertag: input.displayName.trim(),
-      team: null, status: initialRegistrationStatus(b.tournament, asOrganizer),
-      seed: input.seed ?? null, userId: null, createdAt: new Date().toISOString(),
+      team: null, status: outcome.status, reservedUntil: outcome.reservedUntil, statusChangedAt: now,
+      seed: input.seed ?? null, userId: null, createdAt: now,
     };
     db.participants.push(p);
     if (input.contact?.trim()) db.contacts.push({ participantId: p.id, contact: input.contact.trim() });
     save(db);
     return p;
   }
+}
+
+function setStatus(p: Participant, o: { status: Participant['status']; reservedUntil: string | null }) {
+  if (o.status !== p.status) p.statusChangedAt = new Date().toISOString();
+  p.status = o.status;
+  p.reservedUntil = o.reservedUntil;
 }
 
 export function resetLocalData() {

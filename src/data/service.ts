@@ -1,4 +1,5 @@
 import type { Mutation, RegistrationInput } from '@/engine';
+import type { AdminRegistrationAction } from '@/engine';
 import type { Participant, ParticipantContact, RegistrationStatus, Tournament, TournamentBundle, TournamentFormat, TournamentSettings, TournamentStatus, UserIdentity } from '@/types/domain';
 
 export interface TournamentSummary extends Tournament {
@@ -73,10 +74,14 @@ export interface DataService {
   updateParticipant(participantId: string, patch: ParticipantPatch): Promise<void>;
   removeParticipant(participantId: string): Promise<void>;
   listContacts(tournamentId: string): Promise<ParticipantContact[]>;
-  /** Organizer confirms or rejects a paid application (before the draw). */
-  setRegistrationStatus(participantId: string, status: RegistrationStatus): Promise<void>;
-  /** Applicant reports that the payment receipt was sent → awaiting_review. */
-  markReceiptSent(participantId: string): Promise<void>;
+  /** Organizer action on a registration (confirm, reject, waitlist, offer a place, cancel). Before the draw. */
+  registrationAction(participantId: string, action: AdminRegistrationAction): Promise<void>;
+  /** Applicant reports that the payment receipt was sent. Returns the new status (review or waitlist). */
+  markReceiptSent(participantId: string): Promise<RegistrationStatus>;
+  /** Applicant withdraws their own registration (before the draw). */
+  cancelMyRegistration(participantId: string): Promise<void>;
+  /** 1-based waitlist position of the applicant's own registration (null when not waitlisted). */
+  waitlistPosition(participantId: string): Promise<number | null>;
   /** The current player's applications across tournaments (local mode: made in this browser). */
   listMyApplications(): Promise<MyApplication[]>;
   /** Atomically applies an engine mutation if the tournament is still at `expectedVersion`. */

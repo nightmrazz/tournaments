@@ -18,11 +18,16 @@ export const MATCH_STATUSES = ['scheduled', 'in_progress', 'completed', 'postpon
 export type MatchStatus = (typeof MATCH_STATUSES)[number];
 
 /**
- * Application lifecycle when the organizer requires an entry fee:
- * awaiting_payment → (player says the receipt was sent) awaiting_review → confirmed | rejected.
- * Without an entry fee, registrations are confirmed immediately.
+ * Registration lifecycle (stored in participants.payment_status):
+ *   awaiting_payment  ("pending_payment") — submitted; holds a place until reservedUntil
+ *   awaiting_review   ("payment_review")  — receipt sent; place held until the organizer decides
+ *   confirmed         — payment verified (or free event): a participant
+ *   waitlisted        — no free place when applying; ordered by statusChangedAt
+ *   rejected          — payment / registration rejected by the organizer
+ *   cancelled         — withdrawn by the player or cancelled by the organizer
+ * Only the organizer can confirm. Without an entry fee, a free place confirms immediately.
  */
-export const REGISTRATION_STATUSES = ['awaiting_payment', 'awaiting_review', 'confirmed', 'rejected'] as const;
+export const REGISTRATION_STATUSES = ['awaiting_payment', 'awaiting_review', 'confirmed', 'waitlisted', 'rejected', 'cancelled'] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
 export type MatchStage = 'group' | 'knockout';
@@ -60,6 +65,29 @@ export interface TournamentSettings {
   paymentDetails: string;
   /** Organizer's Telegram username (without @) that receives payment receipts. */
   telegramUsername: string;
+  /** Capacity planning: the event can run from minParticipants; targetParticipants is the goal. 0 = not set. */
+  minParticipants: number;
+  targetParticipants: number;
+  /** Registration window opens at (ISO); null = as soon as registration is opened. */
+  registrationOpensAt: string | null;
+  /** Temporarily stop accepting registrations without closing them. */
+  registrationPaused: boolean;
+  /** When all places are taken, new applicants join a waitlist instead of being turned away. */
+  waitlistEnabled: boolean;
+  /** Accept registrations after the deadline (until registration is closed). */
+  allowLateRegistration: boolean;
+  /** How long an unpaid application holds a place before the reservation expires. */
+  reservationMinutes: number;
+  /** Refund / cancellation policy shown to players. */
+  cancellationPolicy: string;
+}
+
+/** Public place counts (no personal data). */
+export interface CapacityCounts {
+  confirmed: number;
+  /** Places taken now: confirmed + receipts under review + unexpired payment reservations. */
+  holding: number;
+  waitlisted: number;
 }
 
 export interface Tournament {
@@ -91,6 +119,10 @@ export interface Participant {
   team: string | null;
   /** Only `confirmed` entries are participants; the others are applications awaiting payment. */
   status: RegistrationStatus;
+  /** For awaiting_payment: the place is reserved until this moment. Null = no active reservation. */
+  reservedUntil: string | null;
+  /** When the status last changed (waitlist order). */
+  statusChangedAt: string;
   /** Optional manual seed (1 = strongest). */
   seed: number | null;
   userId: string | null;
@@ -154,6 +186,11 @@ export interface TournamentBundle {
   groups: Group[];
   groupMembers: GroupMember[];
   matches: Match[];
+  /**
+   * Server-computed place counts. Public viewers only see confirmed rows, so they cannot count
+   * reservations themselves; when absent, counts are computed from `participants`.
+   */
+  counts?: CapacityCounts;
 }
 
 export interface UserIdentity {
@@ -180,4 +217,12 @@ export const DEFAULT_SETTINGS: TournamentSettings = {
   entryFee: '',
   paymentDetails: '',
   telegramUsername: '',
+  minParticipants: 0,
+  targetParticipants: 0,
+  registrationOpensAt: null,
+  registrationPaused: false,
+  waitlistEnabled: false,
+  allowLateRegistration: false,
+  reservationMinutes: 30,
+  cancellationPolicy: '',
 };

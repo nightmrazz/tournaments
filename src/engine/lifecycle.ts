@@ -1,4 +1,4 @@
-import type { Match, Participant, RegistrationStatus, Tournament, TournamentBundle, TournamentStatus } from '@/types/domain';
+import type { CapacityCounts, Match, Participant, RegistrationStatus, Tournament, TournamentBundle, TournamentStatus } from '@/types/domain';
 import { roundName } from './knockout';
 import { computeGroupStandings, fallbackInfo, type GroupStandings } from './standings';
 
@@ -31,18 +31,68 @@ export const FORMAT_LABEL = {
 } as const;
 
 export interface RegistrationState {
+  /** New applications are accepted (possibly only onto the waitlist). */
   open: boolean;
   reason: string | null;
+  /** All places are taken: new applicants go to the waitlist. */
+  waitlistOnly: boolean;
+  /** Past the deadline but late registration is allowed. */
+  late: boolean;
 }
 
-/** Whether new registrations are accepted right now, and why not. */
-export function registrationState(t: Tournament, participantCount: number, now = new Date()): RegistrationState {
-  if (t.status === 'cancelled') return { open: false, reason: 'This tournament has been cancelled.' };
-  if (t.status !== 'registration_open') return { open: false, reason: 'Registration is currently closed.' };
-  if (t.registrationDeadline && new Date(t.registrationDeadline) < now)
-    return { open: false, reason: 'The registration deadline has passed.' };
-  if (participantCount >= t.maxParticipants) return { open: false, reason: 'This tournament is full.' };
-  return { open: true, reason: null };
+/**
+ * Whether new registrations are accepted right now, and why not.
+ * `holding` = places currently taken (confirmed + receipts under review + live payment reservations).
+ */
+export function registrationState(t: Tournament, holding: number, now = new Date()): RegistrationState {
+  const closed = (reason: string): RegistrationState => ({ open: false, reason, waitlistOnly: false, late: false });
+  const s = t.settings;
+  if (t.status === 'cancelled') return closed('This tournament has been cancelled.');
+  if (t.status !== 'registration_open') return closed('Registration is currently closed.');
+  if (s.registrationPaused) return closed('Registration is paused by the organizer.');
+  if (s.registrationOpensAt && new Date(s.registrationOpensAt) > now) return closed('Registration has not opened yet.');
+  const late = !!t.registrationDeadline && new Date(t.registrationDeadline) < now;
+  if (late && !s.allowLateRegistration) return closed('The registration deadline has passed.');
+  if (holding >= t.maxParticipants) {
+    return s.waitlistEnabled ? { open: true, reason: null, waitlistOnly: true, late } : closed('This tournament is full.');
+  }
+  return { open: true, reason: null, waitlistOnly: false, late };
+}
+
+/** True when this registration currently occupies one of the tournament's places. */
+export function holdsSlot(p: Pick<Participant, 'status' | 'reservedUntil'>, now = new Date()): boolean {
+  if (p.status === 'confirmed' || p.status === 'awaiting_review') return true;
+  return p.status === 'awaiting_payment' && !!p.reservedUntil && new Date(p.reservedUntil) > now;
+}
+
+/** An unpaid application whose reservation ran out (it no longer holds a place). */
+export const reservationExpired = (p: Pick<Participant, 'status' | 'reservedUntil'>, now = new Date()) =>
+  p.status === 'awaiting_payment' && !holdsSlot(p, now);
+
+export function countCapacity(participants: readonly Participant[], now = new Date()): CapacityCounts {
+  return {
+    confirmed: participants.filter((p) => p.status === 'confirmed').length,
+    holding: participants.filter((p) => holdsSlot(p, now)).length,
+    waitlisted: participants.filter((p) => p.status === 'waitlisted').length,
+  };
+}
+
+/** Place counts: server-provided when present (public viewers cannot see others' applications). */
+export function capacityOf(b: Pick<TournamentBundle, 'participants' | 'counts'>, now = new Date()): CapacityCounts {
+  return b.counts ?? countCapacity(b.participants, now);
+}
+
+/** Waitlisted applications in queue order (who was waitlisted first). */
+export function waitlistQueue(participants: readonly Participant[]): Participant[] {
+  return participants
+    .filter((p) => p.status === 'waitlisted')
+    .sort((a, c) => a.statusChangedAt.localeCompare(c.statusChangedAt) || a.createdAt.localeCompare(c.createdAt) || a.id.localeCompare(c.id));
+}
+
+/** 1-based waitlist position, or null when the participant is not waitlisted. */
+export function waitlistPosition(participants: readonly Participant[], participantId: string): number | null {
+  const i = waitlistQueue(participants).findIndex((p) => p.id === participantId);
+  return i < 0 ? null : i + 1;
 }
 
 /** Only confirmed registrations are tournament participants (draw, capacity, public lists). */
@@ -56,7 +106,9 @@ export const REGISTRATION_STATUS_LABEL: Record<RegistrationStatus, string> = {
   awaiting_payment: 'Awaiting payment',
   awaiting_review: 'Awaiting receipt check',
   confirmed: 'Confirmed',
-  rejected: 'Payment not confirmed',
+  waitlisted: 'Waitlisted',
+  rejected: 'Rejected',
+  cancelled: 'Withdrawn',
 };
 
 export const groupMatches = (b: TournamentBundle) => b.matches.filter((m) => m.stage === 'group');

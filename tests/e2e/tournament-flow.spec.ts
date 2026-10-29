@@ -50,6 +50,7 @@ test('organizer runs a complete tournament', async ({ page }) => {
   await page.getByRole('button', { name: 'Preview draw' }).click();
   await expect(page.getByTestId('draw-preview')).toContainText('Group B');
   await page.getByRole('button', { name: 'Confirm draw and generate fixtures' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Generate' }).click();
   await expect(page.getByText('Groups and fixtures created')).toBeVisible();
 
   // 4. Record every group result.
@@ -123,6 +124,7 @@ test('organizer assigns teams after the group draw; interface switches to Russia
   await expect(page.getByTestId('team-assignment')).toHaveCount(0);
   await page.getByRole('button', { name: 'Preview draw' }).click();
   await page.getByRole('button', { name: 'Confirm draw and generate fixtures' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Generate' }).click();
   const assign = page.getByTestId('team-assignment');
   await expect(assign).toContainText('Group A');
   await expect(assign).toContainText('Teams assigned: 0/16');
@@ -195,7 +197,7 @@ test('paid registration: application → receipt → organizer confirms', async 
   await page.getByRole('tab', { name: /Participants/ }).click();
   const apps = page.getByTestId('applications');
   await expect(apps).toContainText(`ID ${code}`);
-  await apps.getByRole('button', { name: 'Confirm payment of Payer' }).click();
+  await apps.getByRole('button', { name: 'Confirm payment: Payer' }).click();
   await expect(page.getByText('Payer is confirmed as a participant.')).toBeVisible();
 
   // The player sees the confirmed status and is now listed publicly.
@@ -204,4 +206,72 @@ test('paid registration: application → receipt → organizer confirms', async 
   await page.getByRole('link', { name: 'Paid Cup' }).click();
   await page.getByRole('tab', { name: /Participants/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText('Payer');
+});
+
+test('waitlist, cancellation, offering the freed place, pausing and finalizing the roster', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.goto('/admin/tournaments/new');
+  await page.getByLabel('Tournament name').fill('Waitlist Cup');
+  await page.getByLabel('Format', { exact: true }).selectOption('single_elimination');
+  await page.getByLabel('Maximum participants').fill('2');
+  await page.getByLabel('Minimum players').fill('2');
+  await page.getByRole('checkbox', { name: /^Waitlist/ }).check();
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await page.getByRole('button', { name: 'Publish & open registration' }).click();
+
+  // Pausing stops new registrations without losing anything.
+  await page.getByRole('button', { name: 'Pause registration' }).click();
+  await expect(page.getByText('Registration is paused.')).toBeVisible();
+  await page.getByRole('link', { name: 'Public page' }).click();
+  await expect(page.getByText('Registration is paused by the organizer.').first()).toBeVisible();
+  await page.getByRole('link', { name: 'Manage' }).click();
+  await page.getByRole('button', { name: 'Resume registration' }).click();
+  await page.getByRole('link', { name: 'Public page' }).click();
+
+  // Two places, three players: the third one joins the waitlist.
+  for (const name of ['Anna', 'Bek']) {
+    await page.getByLabel('Display name').fill(name);
+    await page.getByRole('button', { name: 'Register' }).click();
+    await expect(page.getByText(`${name} is registered.`).first()).toBeVisible();
+  }
+  await expect(page.getByTestId('places-left')).toContainText('free places: 0 of 2');
+  await page.getByLabel('Display name').fill('Cara');
+  await page.getByRole('button', { name: 'Join the waitlist' }).click();
+  await expect(page.getByText('All places are taken — Cara was added to the waitlist.').first()).toBeVisible();
+  const cara = page.getByTestId('payment-card').filter({ hasText: 'Waitlist' });
+  await expect(cara).toContainText('Waitlist — position 1');
+
+  // Anna withdraws; the organizer offers the free place to Cara.
+  const anna = page.getByTestId('payment-card').filter({ hasText: 'Anna' });
+  await expect(anna).toContainText('Registration confirmed');
+  await anna.getByRole('button', { name: 'Cancel my registration' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel registration' }).click();
+  await expect(page.getByText('Your registration was cancelled.')).toBeVisible();
+
+  await page.getByRole('link', { name: 'Manage' }).click();
+  await page.getByRole('tab', { name: /Participants/ }).click();
+  await expect(page.getByTestId('registration-stats')).toContainText('1/2');
+  await page.getByRole('tab', { name: /Waitlisted/ }).click();
+  await page.getByRole('button', { name: 'Confirm: Cara' }).click();
+  await expect(page.getByText('Cara is confirmed as a participant.')).toBeVisible();
+  await expect(page.getByTestId('registration-stats')).toContainText('2/2');
+
+  // Finalize: close registration, check the roster and generate the bracket after confirmation.
+  await page.getByRole('button', { name: 'Close registration' }).click();
+  await page.getByRole('tab', { name: 'Stage control' }).click();
+  const roster = page.getByTestId('roster-finalizer');
+  await expect(roster).toContainText('Confirmed participants: 2 of 2');
+  await expect(roster).toContainText('Fits 2 confirmed participants.');
+  await page.getByRole('button', { name: 'Preview bracket' }).click();
+  await page.getByRole('button', { name: 'Confirm and generate' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Generate fixtures for 2 participants?');
+  await dialog.getByRole('button', { name: 'Generate' }).click();
+  await expect(page.getByText('Bracket generated. The tournament is now in progress.')).toBeVisible();
+  await page.getByRole('link', { name: 'Public page' }).click();
+  await page.getByRole('tab', { name: 'Playoffs' }).click();
+  await expect(page.getByRole('region', { name: 'Knockout bracket' })).toContainText('Bek');
+  await expect(page.getByRole('region', { name: 'Knockout bracket' })).not.toContainText('Anna');
+  await expect(page.getByRole('region', { name: 'Knockout bracket' })).toContainText('Cara');
 });

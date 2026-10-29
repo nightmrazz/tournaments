@@ -4,10 +4,11 @@ import { nameMap } from '@/components/matches/MatchCard';
 import { useConfirm, useToast } from '@/components/ui/overlay';
 import { Alert, Button, Card, CardHeader } from '@/components/ui/primitives';
 import {
-  buildKnockout, confirmedParticipants, EngineError, groupConfigProblems, groupLetter, groupStageComplete, groupStageSummary, knockoutMatches,
+  buildKnockout, confirmedParticipants, EngineError, rosterReport, groupConfigProblems, groupLetter, groupStageComplete, groupStageSummary, knockoutMatches,
   knockoutSeedsFromGroups, knockoutShapeNote, newSeed, previewDraw, roundRobinMatchCount, seedsForSingleElimination, sequentialIds,
 } from '@/engine';
 import { useTournamentActions } from '@/features/tournaments/queries';
+import { RosterFinalizer } from './RosterFinalizer';
 import { TeamAssignment } from './TeamAssignment';
 import { t, tr } from '@/i18n';
 import { errorMessage } from '@/lib/utils';
@@ -80,10 +81,27 @@ export function StageControl({ b }: { b: TournamentBundle }) {
     </Step>
   );
 
+  /** Explicit confirmation before fixtures are created — lists everything the organizer should know. */
+  const confirmRoster = () => {
+    const r = rosterReport(tour, b.participants);
+    return confirm({
+      title: t('Generate fixtures for {n} participants?', { n: r.confirmed }),
+      body: (
+        <div className="space-y-2">
+          <p>{t('The participant list is frozen after this step. Only confirmed registrations take part.')}</p>
+          {r.warnings.length > 0 && <ul className="list-inside list-disc text-warning">{r.warnings.map((w) => <li key={w}>{tr(w)}</li>)}</ul>}
+        </div>
+      ),
+      confirmLabel: t('Generate'),
+      destructive: r.warnings.some((w) => w.includes('below the minimum')),
+    });
+  };
+
   const registrationStep = (
-    <Step n={1} title={t('Close registration')} state={tour.status === 'draft' || tour.status === 'registration_open' ? 'active' : 'done'}>
-      {(tour.status === 'draft' || tour.status === 'registration_open') && <p>{t('Fixtures can be generated once registration is closed. Use the status controls above.')} {t('Registered players: {n}.', { n: confirmed.length })}</p>}
-      {unconfirmed > 0 && !b.matches.length && <Alert tone="warning" title={t('{n} unconfirmed applications will not take part in the draw.', { n: unconfirmed })}>{t('Confirm or reject them in the Participants tab first.')}</Alert>}
+    <Step n={1} title={t('Close registration and finalize the roster')} state={b.matches.length ? 'done' : 'active'}>
+      {(tour.status === 'draft' || tour.status === 'registration_open') && <p>{t('Fixtures can be generated once registration is closed. Use the status controls above.')}</p>}
+      {!b.matches.length && <RosterFinalizer b={b} />}
+      {unconfirmed > 0 && !b.matches.length && <p className="text-xs">{t('Unconfirmed registrations are managed in the Participants tab.')}</p>}
     </Step>
   );
 
@@ -106,7 +124,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
                     </ul>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" onClick={() => setSeed(newSeed())}><Shuffle className="h-4 w-4" />{t('Redraw')}</Button>
-                      <Button size="sm" variant="primary" loading={actions.generateBracket.isPending} onClick={() => handle(actions.generateBracket.mutateAsync(seed), t('Bracket generated. The tournament is now in progress.'))}>{t('Confirm and generate')}</Button>
+                      <Button size="sm" variant="primary" loading={actions.generateBracket.isPending} onClick={async () => { if (await confirmRoster()) await handle(actions.generateBracket.mutateAsync(seed), t('Bracket generated. The tournament is now in progress.')); }}>{t('Confirm and generate')}</Button>
                     </div>
                   </>
                 )}
@@ -158,7 +176,7 @@ export function StageControl({ b }: { b: TournamentBundle }) {
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" onClick={() => setSeed(newSeed())}><Shuffle className="h-4 w-4" />{t('Redraw')}</Button>
                       <Button size="sm" variant="primary" loading={actions.generateGroups.isPending} disabled={!draw?.groups}
-                        onClick={() => draw?.groups && handle(actions.generateGroups.mutateAsync(draw.groups), t('Groups and fixtures created. The tournament is now in progress.'))}>
+                        onClick={async () => { if (draw?.groups && await confirmRoster()) await handle(actions.generateGroups.mutateAsync(draw.groups), t('Groups and fixtures created. The tournament is now in progress.')); }}>
                         {t('Confirm draw and generate fixtures')}
                       </Button>
                     </div>

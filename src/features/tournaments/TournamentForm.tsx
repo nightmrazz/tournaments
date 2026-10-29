@@ -47,6 +47,13 @@ const makeSchema = () => z.object({
   entryFee: z.string().trim().max(60, t('At most 60 characters')),
   paymentDetails: z.string().trim().max(1000, t('At most 1000 characters')),
   telegramUsername: z.string().trim().max(40),
+  minParticipants: int(0, 256),
+  targetParticipants: int(0, 256),
+  registrationOpensAt: z.string(),
+  waitlistEnabled: z.boolean(),
+  allowLateRegistration: z.boolean(),
+  reservationMinutes: int(1, 10080),
+  cancellationPolicy: z.string().trim().max(1000, t('At most 1000 characters')),
 }).refine((v) => !v.startsAt || !v.registrationDeadline || v.registrationDeadline <= v.startsAt, {
   path: ['registrationDeadline'], message: t('The deadline must be before the start time'),
 }).refine((v) => v.pointsWin > v.pointsDraw && v.pointsDraw >= v.pointsLoss, {
@@ -57,6 +64,14 @@ const makeSchema = () => z.object({
   path: ['paymentDetails'], message: t('Enter the payment details'),
 }).refine((v) => !v.requirePayment || TELEGRAM_RE.test(v.telegramUsername), {
   path: ['telegramUsername'], message: t('Telegram username: 5–32 Latin letters, digits or _'),
+}).refine((v) => !v.minParticipants || v.minParticipants <= v.maxParticipants, {
+  path: ['minParticipants'], message: t('The minimum cannot be above the maximum'),
+}).refine((v) => !v.targetParticipants || v.targetParticipants <= v.maxParticipants, {
+  path: ['targetParticipants'], message: t('The target cannot be above the maximum'),
+}).refine((v) => !v.minParticipants || !v.targetParticipants || v.minParticipants <= v.targetParticipants, {
+  path: ['targetParticipants'], message: t('The target cannot be below the minimum'),
+}).refine((v) => !v.registrationOpensAt || !v.registrationDeadline || v.registrationOpensAt <= v.registrationDeadline, {
+  path: ['registrationOpensAt'], message: t('Registration must open before the deadline'),
 });
 type FormValues = z.infer<ReturnType<typeof makeSchema>>;
 
@@ -71,6 +86,9 @@ function defaults(tour?: Tournament): FormValues {
     walkoverGoals: s.walkoverGoals, requireContact: s.requireContact, stations: s.stations,
     requirePayment: s.requirePayment, entryFee: s.entryFee, paymentDetails: s.paymentDetails,
     telegramUsername: s.telegramUsername ? `@${s.telegramUsername}` : '',
+    minParticipants: s.minParticipants, targetParticipants: s.targetParticipants, registrationOpensAt: toLocalInput(s.registrationOpensAt),
+    waitlistEnabled: s.waitlistEnabled, allowLateRegistration: s.allowLateRegistration, reservationMinutes: s.reservationMinutes,
+    cancellationPolicy: s.cancellationPolicy,
   };
 }
 
@@ -122,6 +140,10 @@ export function TournamentForm({ initial, locked, onSubmit, submitLabel }: {
           drawSeed: initial?.settings.drawSeed ?? newSeed(),
           requirePayment: f.requirePayment, entryFee: f.entryFee.trim(), paymentDetails: f.paymentDetails.trim(),
           telegramUsername: normalizeTelegram(f.telegramUsername),
+          minParticipants: f.minParticipants, targetParticipants: f.targetParticipants,
+          registrationOpensAt: fromLocalInput(f.registrationOpensAt), registrationPaused: initial?.settings.registrationPaused ?? false,
+          waitlistEnabled: f.waitlistEnabled, allowLateRegistration: f.allowLateRegistration,
+          reservationMinutes: f.reservationMinutes, cancellationPolicy: f.cancellationPolicy.trim(),
         },
       });
     } catch (e) {
@@ -193,9 +215,19 @@ export function TournamentForm({ initial, locked, onSubmit, submitLabel }: {
       </Card>
 
       <Card>
-        <CardHeader title={t('Registration')} />
-        <div className="p-4 sm:p-5">
-          <Checkbox label={t('Require contact information')} description={t('Players must leave a phone, Telegram or email. Only organizers can see it.')} {...register('requireContact')} />
+        <CardHeader title={t('Registration')} description={t('The bracket is not built while people register: you choose the final format after closing registration.')} />
+        <div className="grid gap-4 p-4 sm:grid-cols-3 sm:p-5">
+          <Field label={t('Minimum players')} error={errors.minParticipants?.message} hint={t('0 = not set')}>{(p) => <Input {...p} type="number" min={0} {...register('minParticipants', num)} />}</Field>
+          <Field label={t('Target players')} error={errors.targetParticipants?.message} hint={t('0 = not set')}>{(p) => <Input {...p} type="number" min={0} {...register('targetParticipants', num)} />}</Field>
+          <Field label={t('Maximum players')} hint={t('Set in the Format section')}>{(p) => <Input {...p} value={v.maxParticipants || ''} readOnly disabled />}</Field>
+          <Field label={t('Registration opens')} error={errors.registrationOpensAt?.message} hint={t('Optional: before this time the form stays closed')} className="sm:col-span-3">
+            {(p) => <Input {...p} type="datetime-local" {...register('registrationOpensAt')} />}
+          </Field>
+          <div className="space-y-3 sm:col-span-3">
+            <Checkbox label={t('Waitlist')} description={t('When all places are taken, new players join a waitlist instead of being turned away.')} {...register('waitlistEnabled')} />
+            <Checkbox label={t('Allow late registration')} description={t('Keep accepting registrations after the deadline until you close registration.')} {...register('allowLateRegistration')} />
+            <Checkbox label={t('Require contact information')} description={t('Players must leave a phone, Telegram or email. Only organizers can see it.')} {...register('requireContact')} />
+          </div>
         </div>
       </Card>
 
@@ -212,8 +244,14 @@ export function TournamentForm({ initial, locked, onSubmit, submitLabel }: {
               <Field label={t('Payment details')} error={errors.paymentDetails?.message} className="sm:col-span-2" hint={t('Card number, bank, recipient name, Kaspi number — whatever players need for the transfer.')}>
                 {(p) => <Textarea {...p} {...register('paymentDetails')} className="min-h-28" placeholder={t('e.g. Kaspi Gold 4400 4301 2345 6789, Temirkhan S.')} />}
               </Field>
+              <Field label={t('Payment reservation (minutes)')} error={errors.reservationMinutes?.message} hint={t('How long an unpaid application keeps its place. Once the receipt is sent, the place is kept until you decide.')}>
+                {(p) => <Input {...p} type="number" min={1} {...register('reservationMinutes', num)} />}
+              </Field>
             </>
           )}
+          <Field label={t('Cancellation and refund policy')} error={errors.cancellationPolicy?.message} className="sm:col-span-2" hint={t('Shown to players next to the payment details. Refunds are handled by you — the site does not process them.')}>
+            {(p) => <Textarea {...p} {...register('cancellationPolicy')} placeholder={t('e.g. Full refund if you cancel 24 hours before the start.')} />}
+          </Field>
         </div>
       </Card>
 

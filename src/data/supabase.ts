@@ -1,7 +1,8 @@
 // Supabase backend. Uses only the public anon key; every write is authorized by RLS policies
 // or by SECURITY DEFINER functions that check permissions (see supabase/migrations).
 import { createClient, type PostgrestError, type SupabaseClient } from '@supabase/supabase-js';
-import type { UserIdentity } from '@/types/domain';
+import { EngineError, planAdminAction } from '@/engine';
+import type { CapacityCounts, RegistrationStatus, UserIdentity } from '@/types/domain';
 import {
   parseSettings, toDbMutation, toGroup, toGroupMember, toMatch, toParticipant, toTournament,
   type GroupMemberRow, type GroupRow, type MatchRow, type ParticipantRow, type TournamentRow,
@@ -101,12 +102,14 @@ export function createSupabaseService(url: string, anonKey: string): DataService
     },
 
     async getBundle(id) {
-      const [t, p, g, gm, m] = await Promise.all([
+      const [t, p, g, gm, m, c] = await Promise.all([
         sb.from('tournaments').select('*').eq('id', id).maybeSingle(),
         sb.from('participants').select('*').eq('tournament_id', id).order('created_at'),
         sb.from('groups').select('*').eq('tournament_id', id),
         sb.from('group_members').select('*').eq('tournament_id', id),
         sb.from('matches').select('*').eq('tournament_id', id),
+        // Public viewers only see confirmed rows, so place counts come from the server.
+        sb.rpc('tournament_counts', { p_tournament_id: id }),
       ]);
       const tr = check(t) as TournamentRow | null;
       if (!tr) return null;
@@ -116,6 +119,7 @@ export function createSupabaseService(url: string, anonKey: string): DataService
         groups: (check(g) as GroupRow[]).map(toGroup),
         groupMembers: (check(gm) as GroupMemberRow[]).map(toGroupMember),
         matches: (check(m) as MatchRow[]).map(toMatch),
+        counts: ((check(c) as CapacityCounts[] | null) ?? [])[0],
       };
     },
 
@@ -170,12 +174,33 @@ export function createSupabaseService(url: string, anonKey: string): DataService
       check(await sb.from('participants').delete().eq('id', participantId).select('id').single());
     },
 
-    async setRegistrationStatus(participantId, status) {
-      check(await sb.from('participants').update({ payment_status: status }).eq('id', participantId).select('id').single());
+    async registrationAction(participantId, action) {
+      // The engine decides the transition from fresh data; the database trigger re-checks capacity
+      // under a row lock and RLS limits the update to the tournament's managers.
+      const pr = check(await sb.from('participants').select('tournament_id').eq('id', participantId).single()) as { tournament_id: string };
+      const b = await this.getBundle(pr.tournament_id);
+      const p = b?.participants.find((x) => x.id === participantId);
+      if (!b || !p) fail({ message: 'Participant not found.' });
+      let outcome;
+      try {
+        outcome = planAdminAction(b.tournament, b.participants, p, action, b.matches.length > 0);
+      } catch (e) {
+        if (e instanceof EngineError) throw new AppError(e.message, e.code);
+        throw e;
+      }
+      check(await sb.from('participants').update({ payment_status: outcome.status, reserved_until: outcome.reservedUntil }).eq('id', participantId).select('id').single());
     },
 
     async markReceiptSent(participantId) {
-      check(await sb.rpc('mark_receipt_sent', { p_participant_id: participantId }));
+      return check(await sb.rpc('mark_receipt_sent', { p_participant_id: participantId })) as RegistrationStatus;
+    },
+
+    async cancelMyRegistration(participantId) {
+      check(await sb.rpc('cancel_my_registration', { p_participant_id: participantId }));
+    },
+
+    async waitlistPosition(participantId) {
+      return (check(await sb.rpc('waitlist_position', { p_participant_id: participantId })) as number | null) ?? null;
     },
 
     async listMyApplications() {

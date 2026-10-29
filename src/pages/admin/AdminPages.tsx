@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, FlaskConical, Plus, ShieldAlert, Trash2, Trophy } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FlaskConical, Pause, Play, Plus, ShieldAlert, Trash2, Trophy } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { nameMap } from '@/components/matches/MatchCard';
@@ -177,6 +177,15 @@ export function AdminTournamentPage() {
     catch (e) { toast('error', errorMessage(e)); }
   };
 
+  const paused = tour.settings.registrationPaused;
+  const togglePause = async () => {
+    try {
+      await service.updateTournament(tour.id, { settings: { ...tour.settings, registrationPaused: !paused } });
+      await invalidate();
+      toast(paused ? 'success' : 'warning', paused ? t('Registration resumed.') : t('Registration paused. Existing registrations are kept.'));
+    } catch (e) { toast('error', errorMessage(e)); }
+  };
+
   const remove = async () => {
     if (!(await confirm({ title: t('Delete this tournament?'), body: t('"{name}" and all its participants, fixtures and results will be permanently deleted.', { name: tour.name }), confirmLabel: t('Delete permanently'), destructive: true }))) return;
     try { await service.deleteTournament(tour.id); await qc.invalidateQueries(); toast('success', t('Tournament deleted.')); navigate('/admin'); }
@@ -203,6 +212,12 @@ export function AdminTournamentPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {tour.status !== 'draft' && <Link to={`/tournaments/${tour.id}`}><Button variant="ghost"><ExternalLink className="h-4 w-4" />{t('Public page')}</Button></Link>}
+            {tour.status === 'registration_open' && (
+              <Button variant="secondary" onClick={togglePause}>
+                {paused ? <Play className="h-4 w-4" aria-hidden /> : <Pause className="h-4 w-4" aria-hidden />}
+                {paused ? t('Resume registration') : t('Pause registration')}
+              </Button>
+            )}
             {transitions.map((s) => (
               <Button key={s} variant={STATUS_ACTIONS[s].variant} onClick={() => changeStatus(s)} loading={actions.setStatus.isPending && actions.setStatus.variables === s}>
                 {actionLabel(s)}
@@ -211,6 +226,7 @@ export function AdminTournamentPage() {
             <Button variant="ghost" size="icon" onClick={remove} aria-label={t('Delete tournament')}><Trash2 className="h-4 w-4" /></Button>
           </div>
         </div>
+        {tour.status === 'registration_open' && paused && <Alert tone="warning" title={t('Registration is paused.')}>{t('New players cannot register until you resume. Existing registrations, receipts and the waitlist are kept.')}</Alert>}
         {tour.status === 'draft' && <Alert tone="info" title={t('Draft — only organizers can see this tournament.')}>{t('Publish it to make the public page visible and, optionally, open registration.')}</Alert>}
         {tour.status === 'in_progress' && knockoutComplete(b) && champion && (
           <Alert tone="success" title={t('{name} won the final.', { name: names.get(champion)?.displayName ?? '' })}>{t('Mark the tournament completed to lock the results.')}</Alert>

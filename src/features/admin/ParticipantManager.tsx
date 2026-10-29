@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Lock, Shield, Trash2, UserPlus, Users } from 'lucide-react';
+import { Ban, Lock, Shield, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -35,7 +35,7 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
   });
   const contactOf = new Map((contacts.data ?? []).map((c) => [c.participantId, c.contact]));
   const confirmed = b.participants.filter(isConfirmed);
-  const hasApplications = tour.settings.requirePayment || confirmed.length < b.participants.length;
+  const hasApplications = tour.settings.requirePayment || tour.settings.waitlistEnabled || confirmed.length < b.participants.length;
   const full = confirmed.length >= tour.maxParticipants;
   const drawn = b.matches.length > 0;
   const dups = duplicateTeams(confirmed);
@@ -54,6 +54,16 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
   const remove = async (p: Participant) => {
     if (!(await confirm({ title: t('Remove {name}?', { name: p.displayName }), body: t('Their registration and private contact details will be deleted. They can register again while registration is open.'), confirmLabel: t('Remove participant'), destructive: true }))) return;
     try { await service.removeParticipant(p.id); await invalidate(); toast('success', t('{name} removed.', { name: p.displayName })); }
+    catch (e) { toast('error', errorMessage(e)); }
+  };
+
+  const cancelConfirmed = async (p: Participant) => {
+    if (!(await confirm({
+      title: t('Cancel the registration of {name}?', { name: p.displayName }),
+      body: t('The place is released and the player sees the status "Cancelled". You can then offer the place to the next player on the waitlist.'),
+      confirmLabel: t('Cancel registration'), destructive: true,
+    }))) return;
+    try { await service.registrationAction(p.id, 'cancel'); await invalidate(); toast('warning', t('Registration of {name} cancelled.', { name: p.displayName })); }
     catch (e) { toast('error', errorMessage(e)); }
   };
 
@@ -78,7 +88,7 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
           {t('Fixtures have been generated. Reset the fixtures in Stage control to add, remove or reseed players. Teams are assigned now — here or in Stage control.')}
         </Alert>
       )}
-      {hasApplications && <ApplicationsPanel b={b} contactOf={contactOf} />}
+      {(hasApplications || b.participants.length > 0) && <ApplicationsPanel b={b} contactOf={contactOf} />}
       {!locked && (
         <Card>
           <CardHeader title={t('Add participant')} description={full ? t('The tournament is full. Raise the capacity in Settings to add more.') : t('Add players who registered offline (for example, paid in cash). They are confirmed immediately.')} />
@@ -133,7 +143,8 @@ export function ParticipantManager({ b }: { b: TournamentBundle }) {
                         />
                       </td>
                       <td className="py-2 pr-4 text-right sm:pr-5">
-                        <Button variant="ghost" size="icon" disabled={locked} onClick={() => remove(p)} aria-label={t('Remove {name}', { name: p.displayName })}><Trash2 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" disabled={locked} onClick={() => cancelConfirmed(p)} aria-label={t('Cancel the registration of {name}', { name: p.displayName })} title={t('Cancel registration (frees the place)')}><Ban className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" disabled={locked} onClick={() => remove(p)} aria-label={t('Remove {name}', { name: p.displayName })} title={t('Delete completely')}><Trash2 className="h-4 w-4" /></Button>
                       </td>
                     </tr>
                   );

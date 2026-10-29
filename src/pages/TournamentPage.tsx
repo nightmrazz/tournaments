@@ -8,7 +8,7 @@ import { StageProgress, StatusBadge } from '@/components/tournament/TournamentBi
 import { MatchesView, NextMatches, ParticipantsView, PlayoffsView, StandingsView } from '@/components/tournament/Views';
 import { TabPanel, Tabs, type TabDef } from '@/components/ui/overlay';
 import { Alert, Button, Card, CardHeader, Skeleton } from '@/components/ui/primitives';
-import { confirmedParticipants, FORMAT_LABEL, podium, registrationState, stageProgress } from '@/engine';
+import { capacityOf, confirmedParticipants, FORMAT_LABEL, podium, registrationState, stageProgress } from '@/engine';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { RegisterForm } from '@/features/participants/RegisterForm';
 import { useBundle } from '@/features/tournaments/queries';
@@ -40,8 +40,10 @@ function Overview({ b }: { b: TournamentBundle }) {
   const tour = b.tournament;
   const s = tour.settings;
   const names = nameMap(b.participants);
-  const confirmedCount = confirmedParticipants(b).length;
-  const reg = registrationState(tour, confirmedCount);
+  const counts = capacityOf(b);
+  const confirmedCount = counts.confirmed;
+  const free = Math.max(0, tour.maxParticipants - counts.holding);
+  const reg = registrationState(tour, counts.holding);
   // Until the draw, the registration card also shows a player's own application and its payment status.
   const showRegistration = tour.status === 'registration_open' || tour.status === 'draft' || (tour.status === 'registration_closed' && !b.matches.length);
   return (
@@ -75,6 +77,12 @@ function Overview({ b }: { b: TournamentBundle }) {
               {s.thirdPlaceMatch && <li>{t('A third-place match is played.')}</li>}
               <li>{t('A walkover counts as a {n}–0 win.', { n: s.walkoverGoals })}</li>
             </ul>
+            {s.cancellationPolicy && (
+              <div>
+                <p className="font-medium text-fg">{t('Cancellation and refund policy')}</p>
+                <p className="whitespace-pre-line">{s.cancellationPolicy}</p>
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -84,11 +92,22 @@ function Overview({ b }: { b: TournamentBundle }) {
             <Fact icon={<CalendarDays className="h-4 w-4" />} label={t('Starts')}>{tour.startsAt ? `${formatDate(tour.startsAt)} · ${formatTime(tour.startsAt)}` : t('To be announced')}</Fact>
             {tour.venue && <Fact icon={<MapPin className="h-4 w-4" />} label={t('Venue')}>{tour.venue}</Fact>}
             <Fact icon={<Layers className="h-4 w-4" />} label={t('Format')}>{t(FORMAT_LABEL[tour.format])}</Fact>
-            <Fact icon={<Users className="h-4 w-4" />} label={t('Players')}><span className="tabular">{confirmedCount} / {tour.maxParticipants}</span></Fact>
+            <Fact icon={<Users className="h-4 w-4" />} label={t('Players')}>
+              <span className="tabular" data-testid="player-count">{t('{n} confirmed of {max}', { n: confirmedCount, max: tour.maxParticipants })}</span>
+              {!b.matches.length && tour.status !== 'cancelled' && (
+                <span className="block text-xs font-normal text-subtle tabular">
+                  {t('Free places: {n}', { n: free })}
+                  {counts.waitlisted > 0 && ' · ' + t('waitlist: {n}', { n: counts.waitlisted })}
+                  {s.minParticipants > 0 && ' · ' + t('min. {n}', { n: s.minParticipants })}
+                </span>
+              )}
+            </Fact>
             {s.requirePayment && s.entryFee && <Fact icon={<Wallet className="h-4 w-4" />} label={t('Entry fee')}>{s.entryFee}</Fact>}
             <Fact icon={<Clock className="h-4 w-4" />} label={t('Registration')}>
               {reg.open
-                ? tour.registrationDeadline ? t('Open until {date}', { date: formatDateTime(tour.registrationDeadline) }) : t('Open')
+                ? reg.waitlistOnly ? t('Waitlist only — all places are taken')
+                  : reg.late ? t('Late registration')
+                  : tour.registrationDeadline ? t('Open until {date}', { date: formatDateTime(tour.registrationDeadline) }) : t('Open')
                 : tr(reg.reason ?? '').replace(/\.$/, '')}
             </Fact>
             {s.stations > 0 && <Fact icon={<Monitor className="h-4 w-4" />} label={t('Consoles')}>{t('Stations: {n}', { n: s.stations })}</Fact>}
